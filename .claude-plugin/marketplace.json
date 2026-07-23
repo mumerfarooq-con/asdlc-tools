@@ -1,0 +1,12 @@
+{
+  "name": "asdlc-tools",
+  "owner": { "name": "Conovo Platform" },
+  "description": "ASDLC suite: PRD Implementor, PR Review council, PDQC gate",
+  "plugins": [
+    {
+      "name": "asdlc",
+      "source": "./plugins/asdlc",
+      "description": "Agentic SDLC workflows (PRD Implementor, PR Review, PDQC) and their subagents"
+    }
+  ]
+}

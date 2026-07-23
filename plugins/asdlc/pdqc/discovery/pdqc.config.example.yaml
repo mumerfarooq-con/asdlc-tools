@@ -1,0 +1,53 @@
+# pdqc.config.example.yaml
+# Explicit fallback config. Copy to pdqc.config.yaml and set real paths.
+# Purpose: prove the inspectors produce good findings from known-correct inputs
+# BEFORE trusting discovery to find them. See discovery/discovery.md.
+
+target_repo: "."
+
+# Discovery toggle — the switch for the two-pass v0 discipline (see README).
+#   false = Pass A: use only the paths pinned below; discovery does not run.
+#   true  = Pass B: discover standards/conventions from the repo itself.
+# Start false, prove the inspectors, then flip to true to prove discovery.
+use_discovery: false
+
+# Stack profile to apply. v0 ships only django.
+stack_profile: "profiles/django.md"
+
+# Explicit paths to the repo's own standards (and PRD/design docs — the largest
+# escaped-defect class is implementation-vs-spec drift, so include those).
+# Used directly in Pass A. Clear them in Pass B to let discovery find them.
+standards_docs:
+  # - "docs/coding-standards.md"
+  # - "docs/architecture.md"
+  # - "docs/api-conventions.md"
+  # - "docs/prd/"
+
+# Where the repo keeps its existing sub-agents / commands, so PDQC aligns to
+# the same convention instead of imposing its own.
+agent_conventions_dir: ".claude"    # adjust to the repo's actual location
+
+# Calibration (optional). Jira/ticket history is NOT guaranteed for every codebase.
+#   true  = load the seed checklist below; its patterns run first as prioritization.
+#   false = blind mode: inspectors apply their charters uniformly, no seed.
+# Blind mode is the expected default for a fresh codebase with no usable history.
+use_seed_checklist: false
+
+# Seed checklist produced from ticket history (calibration step), path relative
+# to the TARGET REPO — the plugin does not ship one. Generate yours with the
+# plugin's calibration/extract_seed_checklist.py. Ignored when
+# use_seed_checklist is false or this path is empty.
+seed_checklist: "pdqc/seed-checklist.md"
+
+# Inspectors to run. Leave all enabled for a full pre-delivery pass.
+inspectors:
+  - contract_consistency
+  - error_edge
+  - documentation
+  - maintainability_debt
+  - operability
+
+# Delivery gate: findings with these classifications block delivery until fixed
+# or explicitly waived at sign-off.
+blocking_classifications:
+  - must_fix_before_delivery

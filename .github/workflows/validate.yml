@@ -1,0 +1,19 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm i -g @anthropic-ai/claude-code
+      # Not --strict: the plugin intentionally omits `version` (every commit is
+      # the version), and --strict fails on that warning.
+      - run: claude plugin validate .

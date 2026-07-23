@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "pdqc/finding.schema.json",
+  "title": "PDQC Finding",
+  "description": "The single structured shape every inspector emits and the QA Chair consumes. A finding without a location and a concrete impact is invalid and is dropped before triage.",
+  "type": "object",
+  "required": ["id", "inspector", "principle", "title", "locations", "evidence", "impact", "recommendation", "severity", "confidence", "source"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^PDQC-(contract|error|docs|debt|ops)-[0-9]{3,}$",
+      "description": "e.g. PDQC-contract-001"
+    },
+    "inspector": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "contract_consistency",
+          "error_edge",
+          "documentation",
+          "maintainability_debt",
+          "operability"
+        ]
+      },
+      "description": "One entry normally; multiple only after the Chair merges a cross-inspector duplicate."
+    },
+    "principle": {
+      "type": "string",
+      "description": "The universal (stack-independent) principle this finding violates, in one sentence."
+    },
+    "title": {"type": "string", "maxLength": 120},
+    "locations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": ".+:[0-9]+(-[0-9]+)?$",
+        "description": "path/to/file.ext:line or path/to/file.ext:start-end"
+      }
+    },
+    "evidence": {
+      "type": "string",
+      "description": "The concrete observation. For convention-derived findings, state BOTH the deviation and the established convention it breaks."
+    },
+    "impact": {
+      "type": "string",
+      "description": "What concretely goes wrong for a future developer or in production if unaddressed. Required — no speculative or cosmetic-only impacts."
+    },
+    "recommendation": {
+      "type": "string",
+      "description": "The change to make, written as an instruction for the PRD Implementor. Never a code edit performed by PDQC."
+    },
+    "severity": {"enum": ["blocker", "major", "minor"]},
+    "classification": {
+      "enum": ["must_fix_before_delivery", "log_as_debt"],
+      "description": "Assigned by the QA Chair at triage, not by the inspector. Inspectors may leave this null."
+    },
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "source": {
+      "enum": ["convention_derived", "standards_doc", "seed_checklist"],
+      "description": "convention_derived = inferred from the code's own patterns; standards_doc = violates a documented repo standard; seed_checklist = matched a Jira-calibrated recurring pattern."
+    },
+    "standard_ref": {
+      "type": "string",
+      "description": "When source=standards_doc: the doc + section that defines the violated rule."
+    },
+    "seed_pattern_ref": {
+      "type": "string",
+      "description": "When source=seed_checklist: the seed pattern id this finding instantiates."
+    }
+  }
+}
