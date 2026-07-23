@@ -13,7 +13,7 @@ The `asdlc` plugin ships three workflow entrypoints (invocation names come from 
 
 - `/asdlc:implement-prd` — PRD Implementor: plans, executes, reviews, and tests work from a PRD.
 - `/asdlc:review-pr` — PR Review: a single reviewer by default, or a 3-panelist council with `--council`.
-- `/asdlc:pdqc` — Pre-Delivery Quality Check: a codebase-scoped quality gate that produces findings and delegates fixes (never edits code).
+- `/asdlc:pdqc` — Pre-Delivery Quality Check: a codebase-scoped quality gate that produces findings and delegates fixes (never edits code). Stack profiles shipped: Django, FastAPI, Node/Express, React — profiles are swappable detection heuristics, and new-stack PRs only need to mirror the section headings of an existing profile.
 
 All fifteen subagents ship inside the one plugin, so cross-workflow references resolve without any extra install.
 

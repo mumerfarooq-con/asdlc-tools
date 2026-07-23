@@ -11,7 +11,7 @@ target_repo: "."
 # Start false, prove the inspectors, then flip to true to prove discovery.
 use_discovery: false
 
-# Stack profile to apply. v0 ships only django.
+# Stack profile to apply. Shipped: django, fastapi, node-express, react.
 stack_profile: "profiles/django.md"
 
 # Explicit paths to the repo's own standards (and PRD/design docs — the largest

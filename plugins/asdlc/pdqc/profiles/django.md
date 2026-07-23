@@ -1,6 +1,6 @@
 # Stack Profile: Python / Django (+ DRF)
 
-**This is the only stack-specific artifact in v0.** It is external and swappable. It tells inspectors *how* the universal principles manifest in Django/DRF — it is never the source of a principle. Adding a new stack means writing a sibling profile with the same section headings; the inspectors and rubric do not change.
+**Profiles are the only stack-specific artifacts in PDQC.** Each is external and swappable. It tells inspectors *how* the universal principles manifest in Django/DRF — it is never the source of a principle. Adding a new stack means writing a sibling profile with the same section headings; the inspectors and rubric do not change.
 
 Everything below is a **detection heuristic**, not a rule. The rule always comes from the repo's own standards docs or its dominant observed convention. Where this profile and the repo's docs disagree, the docs win.
 
