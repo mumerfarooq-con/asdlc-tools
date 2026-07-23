@@ -1,6 +1,11 @@
 # asdlc-tools
 
+[![validate](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml/badge.svg)](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Agentic SDLC tooling, distributed as a Claude Code plugin. This repo is both the plugin source and its marketplace.
+
+Three workflows cover the software delivery cycle end to end: a **PRD Implementor** that plans, builds, reviews, and tests from a spec; a **PR Review council** (or a cheap solo reviewer) for diffs; and **PDQC**, a pre-delivery quality gate that catches the cross-cutting issues per-PR review structurally cannot see.
 
 ## Commands
 
