@@ -7,6 +7,8 @@ Agentic SDLC tooling, distributed as a Claude Code plugin. This repo is both the
 
 Three workflows cover the software delivery cycle end to end: a **PRD Implementor** that plans, builds, reviews, and tests from a spec; a **PR Review council** (or a cheap solo reviewer) for diffs; and **PDQC**, a pre-delivery quality gate that catches the cross-cutting issues per-PR review structurally cannot see.
 
+**See it work:** [real reports](examples/) from running PDQC against [healthchecks](https://github.com/healthchecks/healthchecks) (26 triaged findings, 2 verified blockers) and the review council against [wagtail#14411](https://github.com/wagtail/wagtail/pull/14411) (3 lenses, reconciled verdict).
+
 ## Commands
 
 The `asdlc` plugin ships three workflow entrypoints (invocation names come from the command filenames):
