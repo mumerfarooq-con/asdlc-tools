@@ -3,7 +3,7 @@
 [![validate](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml/badge.svg)](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Agentic SDLC tooling, distributed as a Claude Code plugin. This repo is both the plugin source and its marketplace.
+Framework-agnostic agentic SDLC tooling, distributed as a Claude Code plugin. This repo is both the plugin source and its marketplace. The workflows carry universal engineering principles; everything stack-specific lives in swappable [PDQC profiles](plugins/asdlc/pdqc/profiles/) and the target repo's own standards docs (`CLAUDE.md`, README), which always win.
 
 Three workflows cover the software delivery cycle end to end: a **PRD Implementor** that plans, builds, reviews, and tests from a spec; a **PR Review council** (or a cheap solo reviewer) for diffs; and **PDQC**, a pre-delivery quality gate that catches the cross-cutting issues per-PR review structurally cannot see.
 

@@ -6,7 +6,7 @@ argument-hint: <pr-number | pr-url | branch> [base-branch] [--council]
 You are coordinating a PR review for: $ARGUMENTS
 
 Parse arguments:
-- A GitHub URL → **GitHub mode**. A Bitbucket URL → **Bitbucket mode**. A bare number → detect the provider from `git remote get-url origin` (github.com → GitHub mode, bitbucket.org → Bitbucket mode; ask the user if neither). A branch name → **local mode** (second token = base branch, default `develop`).
+- A GitHub URL → **GitHub mode**. A Bitbucket URL → **Bitbucket mode**. A bare number → detect the provider from `git remote get-url origin` (github.com → GitHub mode, bitbucket.org → Bitbucket mode; ask the user if neither). A branch name → **local mode** (second token = base branch, defaulting to the repo's default branch).
 - `--council` present → **Council mode** (3 panelists + chair). Absent → **Solo mode** (single `pr-reviewer`).
 
 ## Preflight
