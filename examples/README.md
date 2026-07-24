@@ -9,7 +9,8 @@ Real, unedited output from the two review workflows, run against well-known open
 
 ## What these demonstrate
 
-- **PDQC on healthchecks**: 38 raw findings triaged to 26 (2 evidence-verified blockers, 12 must-fix work items, 14 logged as debt). Note the Chair's adjudications section — four proposed "blockers" were downgraded because healthchecks *documents* its developer-friendly defaults; the rubric's evidence gate and severity calibration are doing real work, not rubber-stamping inspector output.
+- **PDQC on healthchecks**: 38 raw findings triaged to 26, later corrected to 25 standing (1 verified blocker, 11 must-fix work items, 14 logged as debt). Note the Chair's adjudications section — four proposed "blockers" were downgraded because healthchecks *documents* its developer-friendly defaults; the rubric's evidence gate and severity calibration are doing real work, not rubber-stamping inspector output.
+- **A public retraction, on purpose**: the report originally carried a second blocker (EE-8, a claimed dead code path from a Django `F()` expression). Two agents "verified" it by reading the cited lines; a human follow-up with an executable reproduction showed Django 6 behavior makes the code correct, and the finding was retracted in place rather than silently removed. That's the failure mode these workflows are designed around — treat findings as leads, reproduce before you file.
 - **Council on wagtail#14411**: verdict APPROVE with should-fixes — three panelists reviewed through disjoint lenses (security caught a JXL decompression-bomb gap in the upload gate; correctness caught missing `skipUnless` guards that would break CI without libjxl; architecture caught a broken `elif` dispatch pattern and missing release notes), and the Chair reconciled an explicit severity dispute between two panelists on the same line of code.
 
 ## Framing
