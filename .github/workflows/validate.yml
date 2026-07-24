@@ -14,6 +14,4 @@ jobs:
         with:
           node-version: 20
       - run: npm i -g @anthropic-ai/claude-code
-      # Not --strict: the plugin intentionally omits `version` (every commit is
-      # the version), and --strict fails on that warning.
-      - run: claude plugin validate .
+      - run: claude plugin validate --strict .

@@ -2,6 +2,7 @@
 
 [![validate](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml/badge.svg)](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![version](https://img.shields.io/github/v/tag/mumerfarooq-con/asdlc-tools?label=version&filter=asdlc--v*)](CHANGELOG.md)
 
 Framework-agnostic agentic SDLC tooling, distributed as a Claude Code plugin. This repo is both the plugin source and its marketplace. The workflows carry universal engineering principles; everything stack-specific lives in swappable [PDQC profiles](plugins/asdlc/pdqc/profiles/) and the target repo's own standards docs (`CLAUDE.md`, README), which always win.
 
