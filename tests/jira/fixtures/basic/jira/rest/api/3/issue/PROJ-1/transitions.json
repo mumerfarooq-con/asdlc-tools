@@ -1,0 +1,25 @@
+{
+  "transitions": [
+    {
+      "id": "11",
+      "name": "Back to backlog",
+      "to": {
+        "name": "To Do"
+      }
+    },
+    {
+      "id": "21",
+      "name": "Start work",
+      "to": {
+        "name": "In Progress"
+      }
+    },
+    {
+      "id": "31",
+      "name": "Ready for QA",
+      "to": {
+        "name": "QA"
+      }
+    }
+  ]
+}

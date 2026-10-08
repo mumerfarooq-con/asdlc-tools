@@ -15,3 +15,4 @@ jobs:
           node-version: 20
       - run: npm i -g @anthropic-ai/claude-code
       - run: claude plugin validate --strict .
+      - run: bash tests/jira/run.sh

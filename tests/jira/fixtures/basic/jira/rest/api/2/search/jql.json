@@ -1,0 +1,38 @@
+{
+  "issues": [
+    {
+      "key": "PROJ-1",
+      "fields": {
+        "summary": "Course page shows wrong badge",
+        "issuetype": {
+          "name": "Bug"
+        },
+        "status": {
+          "name": "To Do"
+        },
+        "priority": {
+          "name": "High"
+        },
+        "labels": [
+          "web"
+        ],
+        "description": "h2. What's wrong\nThe badge says Enrolled for guests.\n\nh2. Must still work\nNot sure"
+      }
+    },
+    {
+      "key": "PROJ-2",
+      "fields": {
+        "summary": "Add export button",
+        "issuetype": {
+          "name": "Story"
+        },
+        "status": {
+          "name": "Idea"
+        },
+        "priority": null,
+        "labels": [],
+        "description": null
+      }
+    }
+  ]
+}

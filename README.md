@@ -6,17 +6,18 @@
 
 Framework-agnostic agentic SDLC tooling, distributed as a Claude Code plugin. This repo is both the plugin source and its marketplace. The workflows carry universal engineering principles; everything stack-specific lives in swappable [PDQC profiles](plugins/asdlc/pdqc/profiles/) and the target repo's own standards docs (`CLAUDE.md`, README), which always win.
 
-Three workflows cover the software delivery cycle end to end: a **PRD Implementor** that plans, builds, reviews, and tests from a spec; a **PR Review council** (or a cheap solo reviewer) for diffs; and **PDQC**, a pre-delivery quality gate that catches the cross-cutting issues per-PR review structurally cannot see.
+Three workflows cover the software delivery cycle end to end: a **PRD Implementor** that plans, builds, reviews, and tests from a spec; a **PR Review council** (or a cheap solo reviewer) for diffs; and **PDQC**, a pre-delivery quality gate that catches the cross-cutting issues per-PR review structurally cannot see. A **Jira leg** drives the first two from your Jira tickets, with file-based, hash-bound plan approval.
 
 **See it work:** [real reports](examples/) from running PDQC against [healthchecks](https://github.com/healthchecks/healthchecks) (25 standing findings, 1 verified blocker, and one transparently retracted false positive) and the review council against [wagtail#14411](https://github.com/wagtail/wagtail/pull/14411) (3 lenses, reconciled verdict).
 
 ## Commands
 
-The `asdlc` plugin ships three workflow entrypoints (invocation names come from the command filenames):
+The `asdlc` plugin ships these entrypoints (invocation names come from the command filenames):
 
-- `/asdlc:implement-prd` — PRD Implementor: plans, executes, reviews, and tests work from a PRD.
+- `/asdlc:implement-prd` — PRD Implementor: plans, executes, reviews, and tests work from a PRD. `--plan-only` stops after a stamped plan for file-based approval; `--execute <plan>` runs an approved one.
 - `/asdlc:review-pr` — PR Review: a single reviewer by default, or a 3-panelist council with `--council`.
 - `/asdlc:pdqc` — Pre-Delivery Quality Check: a codebase-scoped quality gate that produces findings and delegates fixes (never edits code). Stack profiles shipped: Django, FastAPI, Node/Express, React — profiles are swappable detection heuristics, and new-stack PRs only need to mirror the section headings of an existing profile.
+- `/asdlc:jira-run` — Jira leg: executes plans you've approved (implement → Bitbucket PR → review), then plans your new tickets and stops for approval. Plain REST calls from shell scripts; no Jira or Bitbucket MCP. Set a repo up once with `/asdlc:jira-setup`. See [the Jira leg README](plugins/asdlc/jira/README.md).
 
 All fifteen subagents ship inside the one plugin, so cross-workflow references resolve without any extra install.
 

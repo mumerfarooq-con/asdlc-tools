@@ -6,7 +6,7 @@
     {
       "name": "asdlc",
       "source": "./plugins/asdlc",
-      "description": "Agentic SDLC workflows (PRD Implementor, PR Review, PDQC) and their subagents"
+      "description": "Agentic SDLC workflows (PRD Implementor, PR Review, PDQC, Jira leg) and their subagents"
     }
   ]
 }

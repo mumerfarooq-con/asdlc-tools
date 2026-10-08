@@ -16,6 +16,7 @@
 
    ```
    claude plugin validate --strict .
+   bash tests/jira/run.sh        # offline Jira-leg script tests (needs jq)
    ```
 
 4. **Bump the version and changelog.** Any change to plugin content (commands, agents, PDQC assets) bumps `plugins/asdlc/.claude-plugin/plugin.json` per semver — patch for fixes/wording, minor for new capability (agents, profiles, modes), major for breaking workflow contracts — and adds a `CHANGELOG.md` entry. `/plugin update` delivers changes reliably only when the version moves.

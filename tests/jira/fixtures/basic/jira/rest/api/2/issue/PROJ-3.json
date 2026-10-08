@@ -1,0 +1,16 @@
+{
+  "key": "PROJ-3",
+  "fields": {
+    "summary": "Rich text ticket",
+    "issuetype": {
+      "name": "Task"
+    },
+    "labels": [],
+    "priority": null,
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": []
+    }
+  }
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "accountId": "acc-2",
+    "displayName": "Zed Tester",
+    "accountType": "atlassian",
+    "active": true
+  },
+  {
+    "accountId": "acc-1",
+    "displayName": "Amy Dev",
+    "accountType": "atlassian",
+    "active": true,
+    "emailAddress": "amy@example.com"
+  },
+  {
+    "accountId": "bot-1",
+    "displayName": "Automation",
+    "accountType": "app",
+    "active": true
+  },
+  {
+    "accountId": "acc-3",
+    "displayName": "Old Hand",
+    "accountType": "atlassian",
+    "active": false
+  }
+]
