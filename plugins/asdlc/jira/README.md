@@ -32,7 +32,21 @@ export BITBUCKET_TOKEN="..."            # workspace/repo access token or user AP
 # export BITBUCKET_EMAIL="..."          # only with BB_AUTH=basic in the config
 ```
 
-Add `plans/.jira-run.lock` to `.gitignore`.
+Add these lines to `.gitignore`: `plans/.jira-run.lock`, `plans/*.plan.md` and `prds/`. Plans and
+PRDs hold ticket text, and a run stages only the files the executor reports, never these.
+`jira-setup.sh check` warns when any of them is not ignored.
+
+### Where your token goes
+Your Jira token is sent only to `JIRA_BASE_URL`, so that URL is checked before every call. It must
+be plain `https://<host>` (no `user@`, path or query), and the host must be `*.atlassian.net`.
+Any other host (a Jira Data Center, say) is accepted only if you list it in your own environment,
+never in the repo:
+```bash
+export ASDLC_JIRA_ALLOWED_HOSTS="jira.example.com"   # comma-separated; shell profile only
+```
+A committed config can't grant itself a host: this variable is not a config key, and putting it
+in `.asdlc/jira.conf` only produces an "unknown key" warning. `jira-setup.sh check` prints the host
+it signed in to.
 
 ## Approving a plan
 After a planning run, open `./plans/<KEY>.plan.md`. At the top is a header block:
@@ -60,11 +74,22 @@ Read the plan, change `status: pending` to `status: approved`, save. That's the 
 /asdlc:jira-run --key PROJ-142          # plan a specific ticket (any sprint/assignee)
 /asdlc:jira-run --sprint active         # scope planning to the open sprint
 /asdlc:jira-run --sprint 42 --status "To Do,Idea"   # other sprints often start as Idea
-/asdlc:jira-run --reset-executing       # clear a stale lock left by a crashed run
+/asdlc:jira-run --reset-executing       # put plans stuck in `executing` back to approved
 ```
 Selection flags (`--key/--sprint/--status/--any-status/--anyone`) scope Phase B planning only;
-Phase A runs every approved plan regardless. Runs are serialized by a lock (`./plans/.jira-run.lock`).
-Commit, push, opening the PR and commenting on it always wait for your go.
+Phase A runs every approved plan regardless, and needs a clean working tree (tracked files) before
+each plan. Runs are serialized by a lock (`./plans/.jira-run.lock`).
+
+The plugin pre-approves no commit, push or Bitbucket write. The command tells the agent to show
+each one and wait for your go, and the harness prompts for them unless your own permission
+settings allow them.
+
+After a crash:
+- `--reset-executing` runs `plan-state.sh reset-executing` on each plan left in `executing`. It
+  restores `approved` only if the plan body is unchanged; if the executor had already ticked a
+  task, the hash no longer matches, so re-stamp the plan and approve it again.
+- It does not touch the lock. A crashed run leaves `./plans/.jira-run.lock` behind, and you clear
+  it by hand with `rmdir ./plans/.jira-run.lock` once no run is going.
 
 Finding a sprint ID: a bare number in `--sprint N` is the sprint's internal ID, not the board
 label. List IDs with `jira-sprints.sh`, or pass the exact name in quotes.
@@ -81,7 +106,7 @@ All read `.asdlc/jira.conf` (or `--conf <file>`), and all Jira/Bitbucket scripts
 plugin repo for the layout).
 - `jira-mine.sh` — list tickets to plan (`--key/--sprint/--status/--any-status/--anyone`).
 - `ticket-to-prd.sh` — one ticket → `./prds/<KEY>.md`.
-- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get`.
+- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing`.
 - `bb-open-pr.sh`, `bb-pr-comment.sh` — open a PR, comment on it.
 - `review-mode.sh` — council vs solo from the PR diff (files/lines/sensitive paths).
 - `jira-transition.sh` — move a ticket by status name, or `:todo :in-progress :testing :needs-info`.

@@ -1,7 +1,7 @@
 ---
 description: Orchestrate PRD implementation (plan → execute → review → test), plan only and stop for file-based approval, execute an approved plan, or run a retrospective review of an already-completed PRD
 argument-hint: <path-to-prd | path-to-plan> [--plan-only | --execute | --review-only]
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh check:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set:*)
 ---
 
 You are orchestrating work for: $ARGUMENTS
@@ -48,11 +48,13 @@ Nothing is implemented in this mode. Approval is not interactive; it lives in th
 
 ## Execute mode (--execute) — run an approved plan
 1. **Gate:** run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh check <plan>`.
-   - Output `RUNNABLE` → proceed.
+   - Output `RUNNABLE` → go to step 2.
    - Anything else (`PENDING` `STALE` `EXECUTING` `DONE` `FAILED` `SKIP` `MISSING`) → report it and STOP.
      Never implement a plan that is not RUNNABLE.
-2. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan.
-3. **Wrap up** — exactly as in Pipeline mode step 3.
+2. **Start:** run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set <plan> status executing`.
+   This command owns that transition, so the caller never sets it first. If it refuses, report why and STOP.
+3. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan.
+4. **Wrap up** — exactly as in Pipeline mode step 3.
 
 ## Retrospective mode (--review-only, already-completed PRD)
 

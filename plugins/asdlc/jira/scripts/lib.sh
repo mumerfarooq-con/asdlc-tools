@@ -32,7 +32,7 @@ asdlc_conf_defaults() {
   IMPACT_EXTRA_PATHS=""; IMPACT_EXCLUDE=".git,node_modules,.venv"
   MAX_IMAGES="10"; MAX_IMAGE_MB="5"
   REVIEW_COUNCIL_FILES="10"; REVIEW_COUNCIL_LINES="400"
-  REVIEW_COUNCIL_PATHS='(migration|migrations|auth|security|secret|credential|password|payment|billing|Dockerfile|\.github/|terraform|helm|k8s|deploy|infra)'
+  REVIEW_COUNCIL_PATHS='(migration|migrations|auth|security|secret|credential|password|payment|billing|Dockerfile|\.github/|\.asdlc/|terraform|helm|k8s|deploy|infra)'
 }
 
 asdlc_die()  { echo "$*" >&2; exit 1; }
@@ -86,7 +86,7 @@ asdlc_load_conf() {
   elif [ "${ASDLC_CONF_OPTIONAL:-0}" != "1" ]; then
     asdlc_die "No Jira config at $ASDLC_CONF_FILE — run /asdlc:jira-setup in the project repo first."
   fi
-  JIRA_BASE_URL="${JIRA_BASE_URL%/}"
+  while [ "${JIRA_BASE_URL%/}" != "$JIRA_BASE_URL" ]; do JIRA_BASE_URL="${JIRA_BASE_URL%/}"; done
 }
 
 # Strip the shared flags (--fixtures DIR, --conf FILE) from a script's
@@ -108,8 +108,45 @@ asdlc_init() {
   asdlc_load_conf
 }
 
+# The Jira token is sent to JIRA_BASE_URL, and a committed config sets that, so
+# the config alone must never decide where credentials go. The URL must be a
+# bare https://host[:port], and the host must be *.atlassian.net or be listed
+# in ASDLC_JIRA_ALLOWED_HOSTS (comma-separated). That variable is read from the
+# user's environment only and is deliberately not a config key, so a repo can't
+# grant itself a host. Exits with the reason if the URL may not get credentials.
+# Matching uses [[ =~ ]] rather than grep, which works per line and would pass a
+# multi-line value if one of its lines looked fine.
+asdlc_check_jira_url() {  # <url>
+  local url="$1" host h shape cloud
+  while [ "${url%/}" != "$url" ]; do url="${url%/}"; done
+  shape='^https://[A-Za-z0-9.-]+(:[0-9]+)?$'
+  cloud='^[A-Za-z0-9-]+\.atlassian\.net$'
+  if ! [[ $url =~ $shape ]]; then
+    asdlc_die "JIRA_BASE_URL '$(printf '%s' "$url" | tr -cd '[:print:]')' is refused: it must be just https://<host> (https only; no user@, path, query or fragment). Nothing was sent."
+  fi
+  host="${url#https://}"; host="$(printf '%s' "${host%%:*}" | tr '[:upper:]' '[:lower:]')"
+  if [[ $host =~ $cloud ]]; then return 0; fi
+  while IFS= read -r h; do
+    if [ "$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')" = "$host" ]; then return 0; fi
+  done < <(asdlc_split_csv "${ASDLC_JIRA_ALLOWED_HOSTS:-}")
+  asdlc_die "JIRA_BASE_URL host '$host' is not an *.atlassian.net site, so your Jira token is not sent there. If it is your own Jira Data Center, run: export ASDLC_JIRA_ALLOWED_HOSTS=$host in your shell profile (never in the repo's config)."
+}
+
+# Workspace and repo slugs go straight into API paths: allow only what
+# Bitbucket uses, and refuse a leading '-' or a '.'/'..' path segment.
+asdlc_check_bb_target() {
+  local k v slug='^[A-Za-z0-9._-]+$'
+  for k in BB_WORKSPACE BB_REPO; do
+    v="${!k}"
+    if ! [[ $v =~ $slug ]] || [ "$v" = "." ] || [ "$v" = ".." ] || [ "${v#-}" != "$v" ]; then
+      asdlc_die "$k '$(printf '%s' "$v" | tr -cd '[:print:]')' is refused: use only letters, digits, '.', '_' and '-', not starting with '-', and not '.' or '..'."
+    fi
+  done
+}
+
 asdlc_need_jira() {
   [ -n "$JIRA_BASE_URL" ] || asdlc_die "JIRA_BASE_URL is not set in $ASDLC_CONF_FILE"
+  asdlc_check_jira_url "$JIRA_BASE_URL"
   [ -n "$ASDLC_FIXTURES" ] && return 0
   : "${JIRA_EMAIL:?set JIRA_EMAIL (your Atlassian login email)}"
   : "${JIRA_TOKEN:?set JIRA_TOKEN (a Jira API token)}"
@@ -118,6 +155,7 @@ asdlc_need_jira() {
 asdlc_need_bb() {
   [ -n "$BB_WORKSPACE" ] || asdlc_die "BB_WORKSPACE is not set in $ASDLC_CONF_FILE"
   [ -n "$BB_REPO" ]      || asdlc_die "BB_REPO is not set in $ASDLC_CONF_FILE"
+  asdlc_check_bb_target
   [ -n "$ASDLC_FIXTURES" ] && return 0
   : "${BITBUCKET_TOKEN:?set BITBUCKET_TOKEN}"
   if [ "$BB_AUTH" = "basic" ]; then : "${BITBUCKET_EMAIL:?set BITBUCKET_EMAIL (BB_AUTH=basic)}"; fi
@@ -140,7 +178,8 @@ asdlc_http() {
   esac
   if [ "$method" = "GET" ]; then args+=(-G); else args+=(-X "$method"); fi
   local code
-  code="$(curl "${args[@]}" "$@" "$path")" || code="000"
+  # "--" ends option parsing, so the URL can never be read as a curl option.
+  code="$(curl "${args[@]}" "$@" -- "$path")" || code="000"
   printf '%s' "${code:-000}"
 }
 

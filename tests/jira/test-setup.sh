@@ -57,7 +57,7 @@ sandbox 'JIRA_PROJECT_NAME=Widgets' 'STATUS_DEFAULT=To Do,Idea'; use_fixtures ba
 "$SETUP" docs >/dev/null
 JIRA_TOKEN=s3cr3t-value run "$SETUP" check
 assert_eq "$CODE" "0" "exit"; assert_contains "$OUT" "All checks passed."
-assert_contains "$OUT" "Jira: signed in as Test User"
+assert_contains "$OUT" "Jira: signed in as Test User at example.atlassian.net" "destination host"
 assert_contains "$OUT" 'status STATUS_DEFAULT: "To Do"'
 assert_contains "$OUT" 'status STATUS_DEFAULT: "Idea"'
 assert_contains "$OUT" 'status STATUS_NEEDS_INFO: "Needs info"'
@@ -85,6 +85,21 @@ sandbox 'TARGET_BRANCH=' 'TICKET_CHECK_MODE=loud'; use_fixtures basic
 run "$SETUP" check
 assert_contains "$OUT" "FAIL  TARGET_BRANCH is empty"; assert_contains "$OUT" "TICKET_CHECK_MODE must be strict or warn"
 assert_eq "$CODE" "1" "exit"
+
+t "check: warns (never fails) when plans/ and prds/ are not git-ignored"
+sandbox; use_fixtures basic
+run "$SETUP" check
+assert_eq "$CODE" "0" "exit without .gitignore"
+assert_contains "$OUT" "warn  not git-ignored: plans/.jira-run.lock plans/x.plan.md prds/x.md" "warning"
+assert_contains "$OUT" "plans/*.plan.md" "suggested pattern"
+printf '%s\n' 'plans/.jira-run.lock' 'plans/*.plan.md' 'prds/' > .gitignore
+run "$SETUP" check
+assert_eq "$CODE" "0" "exit with .gitignore"
+assert_not_contains "$OUT" "not git-ignored" "no warning"
+printf '%s\n' 'prds/' > .gitignore
+run "$SETUP" check
+assert_contains "$OUT" "warn  not git-ignored: plans/.jira-run.lock plans/x.plan.md" "partial"
+assert_not_contains "$OUT" "prds/x.md" "prds ignored"
 
 t "check: token env vars required outside fixture mode"
 sandbox

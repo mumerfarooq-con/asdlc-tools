@@ -8,11 +8,11 @@ Every PR that changes plugin content (commands, agents, PDQC assets) must bump t
 
 ### Added
 
-- **Jira leg** (`/asdlc:jira-run`, `/asdlc:jira-setup`): a two-phase run that executes approved plans (In Progress → `/asdlc:implement-prd --execute` → Bitbucket PR → `/asdlc:review-pr` solo or council by diff) and plans new tickets for file-based approval. Approval lives in the plan file's header block, bound to a sha256 of the plan body; a run lock serializes runs. Commit, push, PR open and PR comments always wait for the user; the ticket moves to Testing on merge via Jira automation.
+- **Jira leg** (`/asdlc:jira-run`, `/asdlc:jira-setup`): a two-phase run that executes approved plans (In Progress → `/asdlc:implement-prd --execute` → Bitbucket PR → `/asdlc:review-pr` solo or council by diff) and plans new tickets for file-based approval. Approval lives in the plan file's header block, bound to a sha256 of the plan body; a run lock serializes runs. The plugin pre-approves no commit, push or Bitbucket write: the command tells the agent to show each and wait for the user's go, and the harness prompts for them unless the user's own permission settings allow them. A run stages only the files the executor reports, never with `git add -A`. The ticket moves to Testing on merge via Jira automation.
 - Jira/Bitbucket scripts under `jira/scripts/` (ticket search, ticket → PRD, plan state, transitions, notify, sprints, people, PR open/comment, review depth), all REST over `curl` + `jq`, bash 3.2 compatible.
 - Per-project config `.asdlc/jira.conf` (`KEY=value`, parsed against an allowlist, never sourced) from `jira/templates/jira.conf`. Tokens stay in env vars (`JIRA_EMAIL`, `JIRA_TOKEN`, `BITBUCKET_TOKEN`). `/asdlc:jira-setup` pre-fills it from older in-repo env vars, checks tokens, makes test calls to Jira and Bitbucket, verifies workflow statuses, and creates `docs/access-rules.md` and `docs/known-traps.md` from templates.
 - Fixture mode (`--fixtures <dir>`) on every Jira/Bitbucket script, and an offline test suite (`tests/jira/run.sh`) run in CI.
-- `/asdlc:implement-prd --plan-only` (plan, stamp, stop for approval) and `--execute <plan>` (run only a plan that checks RUNNABLE). The default pipeline mode is unchanged.
+- `/asdlc:implement-prd --plan-only` (plan, stamp, stop for approval) and `--execute <plan>` (run only a plan that checks RUNNABLE). The default pipeline mode is unchanged apart from the foreground-subagent rule.
 
 [1.1.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.1.0
 

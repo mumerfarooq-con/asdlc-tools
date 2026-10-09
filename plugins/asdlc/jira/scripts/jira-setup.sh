@@ -97,6 +97,11 @@ do_check() {
   done
   case "$TICKET_CHECK_MODE" in strict|warn) ;; *) fail "TICKET_CHECK_MODE must be strict or warn (is '$TICKET_CHECK_MODE')" ;; esac
   case "$BB_AUTH" in bearer|basic) ;; *) fail "BB_AUTH must be bearer or basic (is '$BB_AUTH')" ;; esac
+  # Where the tokens would go: refuse before any call. The checks exit on a bad
+  # value, so run them in a subshell and report the reason as a FAIL line.
+  local why
+  if [ -n "$JIRA_BASE_URL" ] && ! why="$(asdlc_check_jira_url "$JIRA_BASE_URL" 2>&1)"; then fail "$why"; fi
+  if [ -n "$BB_WORKSPACE" ] && [ -n "$BB_REPO" ] && ! why="$(asdlc_check_bb_target 2>&1)"; then fail "$why"; fi
   [ "$fails" -eq 0 ] || return 0
 
   # Token env vars: report presence only, never values.
@@ -110,7 +115,7 @@ do_check() {
 
   local tmp code; tmp="$(mktemp)"
   code=$(asdlc_http jira GET /rest/api/2/myself "$tmp")
-  if asdlc_http_ok "$code"; then ok "Jira: signed in as $(jq -r '.displayName // .emailAddress // "?"' "$tmp")"
+  if asdlc_http_ok "$code"; then ok "Jira: signed in as $(jq -r '.displayName // .emailAddress // "?"' "$tmp") at ${JIRA_BASE_URL#https://}"
   else fail "Jira test call (HTTP $code)"; asdlc_http_fail jira "$code" "$tmp" 2>&1 | sed 's/^/      /'; fi
 
   code=$(asdlc_http jira GET "/rest/api/2/project/$JIRA_PROJECT_KEY" "$tmp")
@@ -154,6 +159,17 @@ do_check() {
   for k in ACCESS_RULES_PATH KNOWN_TRAPS_PATH; do
     if [ -f "$TOP/${!k}" ]; then ok "${!k} exists"; else warn "${!k} missing — run: jira-setup.sh docs"; fi
   done
+
+  # Plans and PRDs hold ticket text and the run lock is transient: none should
+  # ever be committed. Exit 1 means "not ignored"; 128 (no repo) says nothing.
+  local p rc unignored=""
+  for p in plans/.jira-run.lock plans/x.plan.md prds/x.md; do
+    rc=0; git -C "$TOP" check-ignore -q "$p" 2>/dev/null || rc=$?
+    [ "$rc" -eq 1 ] && unignored="$unignored $p"
+  done
+  if [ -n "$unignored" ]; then
+    warn "not git-ignored:$unignored — add to .gitignore: plans/.jira-run.lock, plans/*.plan.md, prds/"
+  fi
 }
 
 case "$cmd" in

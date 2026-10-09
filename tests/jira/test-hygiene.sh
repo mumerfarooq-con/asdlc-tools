@@ -32,10 +32,26 @@ for ref in $(grep -ohE '\$\{CLAUDE_PLUGIN_ROOT\}/jira/scripts/[a-z-]+\.sh' "$P"/
   [ -f "$P/${ref#\$\{CLAUDE_PLUGIN_ROOT\}/}" ] && ok || nok "missing $ref"
 done
 
-t "jira-run never pre-approves plan approval or Bitbucket writes"
+t "jira-run's pre-approved tools exclude plan approval, Bitbucket writes, commit and push"
 fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/jira-run.md")"
 assert_not_contains "$fm" "plan-state.sh:*" "blanket plan-state"
+assert_not_contains "$fm" "plan-state.sh approve" "plan-state approve"
 assert_not_contains "$fm" "bb-open-pr.sh" "bb-open-pr"
 assert_not_contains "$fm" "bb-pr-comment.sh" "bb-pr-comment"
+assert_not_contains "$fm" "Bash(git:*)" "blanket git"
+assert_not_contains "$fm" "git commit" "git commit"
+assert_not_contains "$fm" "git push" "git push"
+assert_contains "$fm" "Bash(git add:*)" "explicit git add"
+assert_not_contains "$fm" "git log" "git log"
+assert_not_contains "$fm" "git diff" "git diff"
+assert_not_contains "$fm" "git pull" "git pull"
+# A new git grant must be added here on purpose.
+for g in $(printf '%s' "$fm" | grep -oE 'Bash\(git [a-z-]+' | sed 's/Bash(git //'); do
+  case "$g" in status|rev-parse|merge-base|checkout|branch|add|check-ignore) ok ;; *) nok "unexpected git grant: $g" ;; esac
+done
+fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/implement-prd.md")"
+assert_not_contains "$fm" "plan-state.sh:*" "implement-prd blanket plan-state"
+assert_not_contains "$fm" "git commit" "implement-prd git commit"
+assert_not_contains "$fm" "git push" "implement-prd git push"
 
 finish
