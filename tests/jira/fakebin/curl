@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Test stand-in for curl. Records its argv as one JSON line in $FAKECURL_LOG,
+# then behaves like a server that answers $FAKECURL_CODE (default 200) with
+# $FAKECURL_BODY (default {}), or like curl failing with $FAKECURL_EXIT.
+# Nothing here touches the network.
+[ -n "${FAKECURL_LOG:-}" ] || { echo "fake curl: set FAKECURL_LOG" >&2; exit 99; }
+# One jq call per argument: option-like values stay values, and an argument
+# holding newlines (a pretty-printed -d body) stays one element.
+argv="[]"
+if [ $# -gt 0 ]; then argv="$(for a in "$@"; do jq -n --arg a "$a" '$a'; done | jq -sc .)"; fi
+printf '%s\n' "$argv" >> "$FAKECURL_LOG"
+
+out=""; write_fmt=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --) break ;;                       # what follows is the URL
+    -o) out="${2:-}"; shift 2 ;;
+    -w) write_fmt="${2:-}"; shift 2 ;;
+    *)  shift ;;
+  esac
+done
+
+rc="${FAKECURL_EXIT:-0}"
+if [ "$rc" -ne 0 ]; then echo "curl: ($rc) simulated failure" >&2; fi
+empty='{}'
+[ -n "$out" ] && printf '%s' "${FAKECURL_BODY:-$empty}" > "$out"
+[ -n "$write_fmt" ] && printf '%s' "${FAKECURL_CODE:-200}"
+exit "$rc"

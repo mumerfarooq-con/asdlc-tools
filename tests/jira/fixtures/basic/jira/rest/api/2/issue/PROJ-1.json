@@ -1,0 +1,16 @@
+{
+  "key": "PROJ-1",
+  "fields": {
+    "summary": "Course page shows wrong badge",
+    "issuetype": {
+      "name": "Bug"
+    },
+    "labels": [
+      "web"
+    ],
+    "priority": {
+      "name": "High"
+    },
+    "description": "h2. What's wrong\nThe badge says Enrolled for guests.\n\nh2. Must still work\nNot sure"
+  }
+}

@@ -1,0 +1,39 @@
+[
+  {
+    "name": "Bug",
+    "statuses": [
+      {
+        "name": "To Do"
+      },
+      {
+        "name": "In Progress"
+      },
+      {
+        "name": "Testing"
+      },
+      {
+        "name": "Done"
+      }
+    ]
+  },
+  {
+    "name": "Story",
+    "statuses": [
+      {
+        "name": "To Do"
+      },
+      {
+        "name": "Idea"
+      },
+      {
+        "name": "In Progress"
+      },
+      {
+        "name": "Testing"
+      },
+      {
+        "name": "Needs info"
+      }
+    ]
+  }
+]
