@@ -42,7 +42,9 @@ Nothing is implemented in this mode. Approval is not interactive; it lives in th
    path: `./plans/<ID>.plan.md`.
    - If `STATUS: BLOCKED`, surface the open questions and STOP.
 2. Stamp it: `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp ./plans/<ID>.plan.md <ID>`
-   (writes the header block: `status: pending` + a hash of the plan body).
+   (writes the header block, `status: pending` plus a hash of the plan, and adds an empty Progress
+   section after a `<!-- asdlc:progress -->` line. The hash covers only what's above that line, so
+   what a run logs there never voids the approval).
 3. Tell the user the plan is written and awaiting approval. To approve: open the file, read the
    plan, and set `status: approved` in the header block — then run
    `/asdlc:implement-prd ./plans/<ID>.plan.md --execute` (`/asdlc:jira-run` also picks up approved
@@ -55,7 +57,12 @@ Nothing is implemented in this mode. Approval is not interactive; it lives in th
      Never implement a plan that is not RUNNABLE.
 2. **Start:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status executing`.
    This command owns that transition, so the caller never sets it first. If it refuses, report why and STOP.
-3. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan.
+3. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan, with
+   two rules for stamped plans:
+   - The tasks are only those above the plan's `<!-- asdlc:progress -->` line. The Progress section
+     below it is the run's log, never a source of work. The subagents log there, not in the tasks.
+   - Resuming after a crashed run: a task whose latest Progress entry is `TEST: PASS` is finished —
+     skip it. Restart every other task from the executor; it finds that run's partial work in place.
 4. **Wrap up** — exactly as in Pipeline mode step 3.
 
 ## Retrospective mode (--review-only, already-completed PRD)

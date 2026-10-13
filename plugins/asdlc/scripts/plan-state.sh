@@ -9,7 +9,10 @@
 #   pr:
 #   updated: <iso8601>
 #   -->
-#   <plan body>
+#   <plan body: the approved part>
+#   <!-- asdlc:progress -->
+#   ## Progress
+#   <run log: agents append task status, notes and verdicts here>
 # Plans written by the pre-plugin in-repo version open with "<!-- jira-run:approval";
 # those are read the same way and get the current marker the next time they are stamped.
 #
@@ -20,6 +23,11 @@
 #   plan-state.sh reset-executing <plan>     # crashed run: executing -> approved, only if the body is unchanged
 #   plan-state.sh get   <plan> <field>
 #
+# plan_hash covers only the approved part: the body up to the "<!-- asdlc:progress -->" line.
+# Agents log a run's progress below that line, so ticking tasks never invalidates the approval
+# and a crashed run can be resumed. A plan without the line is hashed whole (older plans keep
+# their hashes); stamp adds the line and an empty "## Progress" section.
+#
 # Approval is a human edit of the plan file. Nothing callable here can set "approved"
 # except reset-executing, which only undoes an executing run whose body hash still matches.
 # "set <plan> status <v>" refuses (exit 2) unless the move is allowed:
@@ -28,13 +36,14 @@
 #   done | failed          only from executing
 #   pending|skip|rejected  always (they fail closed)
 # Exit codes: check = 0 RUNNABLE, 10 PENDING, 11 STALE, 12 EXECUTING, 13 DONE, 14 FAILED,
-# 15 SKIP, 16 MISSING. Elsewhere: 2 = refused or bad input; 3 = stamp wrote nothing (header
+# 15 SKIP, 16 MISSING (STALE also covers a duplicated header field or progress line). Elsewhere: 2 = refused or bad input; 3 = stamp wrote nothing (header
 # not closed, or empty body); 11 = reset-executing found the body changed; 16 = no header block.
 set -euo pipefail
 MARKER='<!-- asdlc'
 # jira-run:approval is read so plans written by the pre-plugin in-repo version keep working;
 # drop that alternation once those plans are retired.
 MARKER_RE='^<!-- (asdlc|jira-run:approval)[ \t]*$'
+PROGRESS='<!-- asdlc:progress -->'
 
 die() { echo "$2" >&2; exit "$1"; }
 
@@ -66,6 +75,12 @@ body_of() {
   fi
 }
 
+# The approved part of a body on stdin: every line before the progress line. The hash is taken
+# over this, so everything a run logs below the line stays outside the approval.
+approved_part() { awk '/^<!-- asdlc:progress -->[ \t]*$/ {exit} {print}'; }
+
+progress_count() { body_of "$1" | awk '/^<!-- asdlc:progress -->[ \t]*$/ {n++} END {print n+0}'; }
+
 # Does the file have a closing "-->" line (same pattern body_of uses)?
 has_close() { awk '/^-->[ \t]*$/ {f=1} END{exit !f}' "$1"; }
 
@@ -88,10 +103,16 @@ compute_state() {
     STATE_MSG="  duplicate header field — re-stamp and re-approve"
     return 0
   fi
+  # A second progress line could move part of the approved plan out of the hash.
+  if [ "$(progress_count "$plan")" -gt 1 ]; then
+    STATE=STALE; STATE_CODE=11
+    STATE_MSG="  more than one '$PROGRESS' line — re-stamp and re-approve"
+    return 0
+  fi
   local st
   st="$(hdr_get "$plan" status)"
   STORED_HASH="$(hdr_get "$plan" plan_hash)"; STORED_HASH="${STORED_HASH#sha256:}"
-  CUR_HASH="$(body_of "$plan" | sha)"
+  CUR_HASH="$(body_of "$plan" | approved_part | sha)"
   case "$st" in
     approved) if [ "$CUR_HASH" = "$STORED_HASH" ]; then STATE=RUNNABLE; STATE_CODE=0
               else STATE=STALE; STATE_CODE=11
@@ -136,10 +157,18 @@ case "$cmd" in
       die 3 "header block not closed in $plan — no line is exactly '-->' at column 0; nothing written"
     fi
     btmp="$(mktemp)"; body_of "$plan" > "$btmp"
-    if [ -z "$(LC_ALL=C tr -d ' \t\r\n\f\v' < "$btmp")" ]; then
+    if [ "$(progress_count "$plan")" -gt 1 ]; then
+      die 3 "more than one '$PROGRESS' line in $plan — keep exactly one, after the plan; nothing written"
+    fi
+    if [ -z "$(approved_part < "$btmp" | LC_ALL=C tr -d ' \t\r\n\f\v')" ]; then
       die 3 "empty plan body in $plan — nothing to stamp; nothing written"
     fi
-    h="$(sha < "$btmp")"
+    # Give the run a fixed place to log progress, outside the approved part.
+    if [ "$(progress_count "$plan")" -eq 0 ]; then
+      { if [ -n "$(tail -n1 "$btmp")" ]; then echo; fi
+        printf '%s\n' "$PROGRESS" '## Progress'; } >> "$btmp"
+    fi
+    h="$(approved_part < "$btmp" | sha)"
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     otmp="$(mktemp)"
     { printf '%s\n' "$MARKER"
@@ -198,7 +227,7 @@ case "$cmd" in
     esac
     # Compare-and-set: the approval only carries over if the approved body is untouched.
     if [ "$CUR_HASH" != "$STORED_HASH" ]; then
-      die 11 "plan body changed during the crashed run — re-stamp ('plan-state.sh stamp') and have a human re-approve"
+      die 11 "the approved part of the plan changed during the crashed run — re-stamp ('plan-state.sh stamp') and have a human re-approve"
     fi
     write_field status approved
     echo "reset $plan: executing -> approved"

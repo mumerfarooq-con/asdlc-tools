@@ -30,6 +30,16 @@ assert_eq "$(posts)" "[]" "no POST"
 run "$S/jira-transition.sh" PROJ-1 :bogus
 assert_eq "$CODE" "1" "alias exit"; assert_contains "$ERR" "unknown status alias"
 
+t "transition is a no-op when the ticket is already in the target status"
+sandbox; use_fixtures basic
+jq '.fields.status.name = "In Progress"' fx/jira/rest/api/3/issue/PROJ-1.json > fx/t && mv fx/t fx/jira/rest/api/3/issue/PROJ-1.json
+run "$S/jira-transition.sh" PROJ-1 :in-progress
+assert_eq "$CODE" "0" "exit"; assert_eq "$OUT" 'PROJ-1 is already in "In Progress"'
+assert_eq "$(posts)" "[]" "no POST"
+assert_eq "$(requests | jq -r '[.[] | select(.path | endswith("/transitions"))] | length')" "0" "transitions not even listed"
+run "$S/jira-transition.sh" PROJ-1 "QA"
+assert_eq "$(posts | jq -r '.[0].body.transition.id')" "31" "a different target still transitions"
+
 t "notify: watchers + one ADF mention comment"
 sandbox 'NOTIFY_ACCOUNT_IDS= acc-1 , acc-2 ,'; use_fixtures basic
 run "$S/jira-notify.sh" PROJ-1 "Ready."

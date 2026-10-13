@@ -47,11 +47,28 @@ assert_not_contains "$fm" "git diff" "git diff"
 assert_not_contains "$fm" "git pull" "git pull"
 # A new git grant must be added here on purpose.
 for g in $(printf '%s' "$fm" | grep -oE 'Bash\(git [a-z-]+' | sed 's/Bash(git //'); do
-  case "$g" in status|rev-parse|merge-base|checkout|branch|add|check-ignore) ok ;; *) nok "unexpected git grant: $g" ;; esac
+  case "$g" in status|add) ok ;; *) nok "unexpected git grant: $g" ;; esac
 done
-fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/implement-prd.md")"
-assert_not_contains "$fm" "plan-state.sh:*" "implement-prd blanket plan-state"
-assert_not_contains "$fm" "git commit" "implement-prd git commit"
-assert_not_contains "$fm" "git push" "implement-prd git push"
+
+# Plan approval (M2's plan-state.sh approve) and clearing another run's lock are human-only.
+# Permission rules match by prefix, so check every command, and check that no pre-approved
+# subcommand is a prefix of a human-only one ("unlock:*" must not cover "unlock-force" etc.).
+t "no command pre-approves plan approval or force-unlock, even by prefix"
+for cmdfile in "$P"/commands/*.md; do
+  name="$(basename "$cmdfile" .md)"
+  fm="$(sed -n '/^---$/,/^---$/p' "$cmdfile")"
+  assert_not_contains "$fm" "plan-state.sh:*" "$name: blanket plan-state"
+  assert_not_contains "$fm" "plan-state.sh approve" "$name: plan-state approve"
+  assert_not_contains "$fm" "run-state.sh:*" "$name: blanket run-state"
+  assert_not_contains "$fm" "run-state.sh force-unlock" "$name: force-unlock"
+  assert_not_contains "$fm" "git commit" "$name: git commit"
+  assert_not_contains "$fm" "git push" "$name: git push"
+  for pair in "plan-state.sh:approve" "run-state.sh:force-unlock"; do
+    script="${pair%%:*}"; human="${pair#*:}"
+    for sub in $(printf '%s' "$fm" | grep -oE "$script [a-z-]+:\\*" | sed -E "s/^$script ([a-z-]+):\\*$/\\1/"); do
+      case "$human" in "$sub"*) nok "$name: pre-approved '$script $sub' is a prefix of human-only '$human'" ;; *) ok ;; esac
+    done
+  done
+done
 
 finish

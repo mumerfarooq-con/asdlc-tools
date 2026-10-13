@@ -4,6 +4,25 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.2.0] - 2026-10-13
+
+### Added
+
+- **Resumable Jira runs.** A stamped plan now has a Progress section after an `<!-- asdlc:progress -->` line, and the approval hash covers only the plan above that line. The executor, reviewer and tester log task status, notes and verdicts there instead of inside the tasks, so a run's own logging never voids the approval. After a crash, `--reset-executing` restores the approval and the next run resumes on the plan's branch, skipping tasks that already passed their tests. Plans stamped before this release keep their hashes.
+- `jira/scripts/run-state.sh`:
+  - `lock` / `unlock <run-id>` / `status` hold the run lock, which records which run holds it and since when.
+  - `force-unlock` is human-only and never pre-approved.
+  - `reset-executing` and `list` work across all plans.
+  - `start-branch` creates `feature/<KEY>-<slug>` off an up-to-date target branch, or resumes the branch the plan recorded. It never reuses or resets a branch the plan didn't record, and it reduces the ticket summary to `[a-z0-9-]` before using it in the branch name.
+
+### Changed
+
+- `jira-transition.sh` does nothing and exits 0 when the ticket is already in the target status, so a re-run doesn't fail on In Progress.
+- `/asdlc:jira-run` pre-approves only `git status` and `git add`: the branch setup moved into `run-state.sh start-branch`, which runs fixed git commands.
+- `prd-executor`, `prd-reviewer` and `prd-tester` write to the Progress section when a plan has one. Plans without it, such as those from the default `/asdlc:implement-prd` pipeline, are updated in place as before.
+
+[1.2.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.2.0
+
 ## [1.1.1] - 2026-10-13
 
 First tagged release of the Jira leg (1.1.0 was merged but never tagged; its changes ship here).

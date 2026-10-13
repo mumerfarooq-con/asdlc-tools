@@ -5,6 +5,17 @@ PS="$SHARED/plan-state.sh"
 
 body() { printf '# PROJ-1: plan\n\n## Changes\n1. do it\n'; }
 bodyhash() { body | shasum -a 256 | awk '{print $1}'; }
+# stamp appends a blank line, the progress line and "## Progress"; the hash covers the body
+# plus that blank line, i.e. everything above the progress line.
+PROGRESS='<!-- asdlc:progress -->'
+approvedhash() { { body; echo; } | shasum -a 256 | awk '{print $1}'; }
+stamped_body() { body; echo; echo "$PROGRESS"; echo "## Progress"; }
+# Edit the approved part: insert a line just above the progress line (or append if none).
+edit_approved() {  # <plan> <line>
+  L="$2" awk -v p="$PROGRESS" '!done && index($0, p) == 1 {print ENVIRON["L"]; done=1} {print} END {if (!done) print ENVIRON["L"]}' \
+    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+log_progress() { printf '%s\n' "$2" >> "$1"; }  # <plan> <line>: what an agent appends during a run
 
 # The human edit that approves a plan (or forces any state): rewrite the status line through
 # a temp file, because sed -i differs between BSD and GNU.
@@ -23,8 +34,8 @@ assert_eq "$CODE" "0" "exit"
 assert_eq "$(head -n1 plans/PROJ-1.plan.md)" "<!-- asdlc" "marker"
 assert_eq "$("$PS" get plans/PROJ-1.plan.md ticket)" "PROJ-1" "ticket from filename"
 assert_eq "$("$PS" get plans/PROJ-1.plan.md status)" "pending"
-assert_eq "$("$PS" get plans/PROJ-1.plan.md plan_hash)" "sha256:$(bodyhash)"
-assert_eq "$(sed '1,/^-->$/d' plans/PROJ-1.plan.md)" "$(body)" "body untouched"
+assert_eq "$("$PS" get plans/PROJ-1.plan.md plan_hash)" "sha256:$(approvedhash)" "hash of the approved part"
+assert_eq "$(sed '1,/^-->$/d' plans/PROJ-1.plan.md)" "$(stamped_body)" "body kept, progress section added"
 
 t "pending -> PENDING (10); a human-approved plan -> RUNNABLE (0)"
 run "$PS" check plans/PROJ-1.plan.md; assert_eq "$OUT/$CODE" "PENDING/10"
@@ -39,7 +50,7 @@ assert_eq "$("$PS" get plans/PROJ-1.plan.md pr)" "https://example.org/pr/1"
 run "$PS" check plans/PROJ-1.plan.md; assert_eq "$OUT" "RUNNABLE"
 
 t "editing the body after approval -> STALE (11)"
-echo "2. sneak in" >> plans/PROJ-1.plan.md
+edit_approved plans/PROJ-1.plan.md "2. sneak in"
 run "$PS" check plans/PROJ-1.plan.md; assert_eq "$OUT/$CODE" "STALE/11"
 assert_contains "$ERR" "plan body changed"
 
@@ -86,7 +97,7 @@ for s in pending executing done failed skip; do
   assert_contains "$ERR" "RUNNABLE" "executing from $s"
   assert_same "$P" "$SB/orig" "plan after refused executing from $s"
 done
-mk T; approve "$P"; echo "3. sneak in" >> "$P"; cp "$P" "$SB/orig"
+mk T; approve "$P"; edit_approved "$P" "3. sneak in"; cp "$P" "$SB/orig"
 run "$PS" set "$P" status executing
 assert_eq "$CODE" "2" "executing from STALE"
 assert_same "$P" "$SB/orig" "plan after refused executing from STALE"
@@ -145,7 +156,7 @@ assert_eq "$("$PS" get "$P" branch)" "feature/R-1" "branch kept"
 
 t "reset-executing: edited body -> exit 11, status unchanged"
 mk R; approve "$P"; "$PS" set "$P" status executing >/dev/null
-echo "- [x] task 1" >> "$P"; cp "$P" "$SB/orig"
+edit_approved "$P" "- [x] task 1 (ticked inside the approved part)"; cp "$P" "$SB/orig"
 run "$PS" reset-executing "$P"
 assert_eq "$CODE" "11" "exit"
 assert_contains "$ERR" "changed during the crashed run" "message"
@@ -302,7 +313,48 @@ for marker in '<!-- jira-run:approval'; do
   run "$PS" check plans/PROJ-9.plan.md; assert_eq "$OUT" "RUNNABLE" "$marker reset-executing"
   "$PS" stamp plans/PROJ-9.plan.md >/dev/null
   assert_eq "$(head -n1 plans/PROJ-9.plan.md)" "<!-- asdlc" "$marker upgraded by stamp"
-  assert_eq "$("$PS" get plans/PROJ-9.plan.md plan_hash)" "sha256:$(bodyhash)" "$marker same hash"
+  assert_eq "$("$PS" get plans/PROJ-9.plan.md plan_hash)" "sha256:$(approvedhash)" "$marker re-stamped over the approved part"
 done
+
+# ---- The progress log: outside the approval hash, so a crashed run can resume ----------
+
+t "progress logged below the progress line keeps the plan RUNNABLE"
+mk G; P=plans/G.plan.md; approve "$P"
+log_progress "$P" "- Task 1: DONE — files a.py"
+log_progress "$P" "- Task 1: TEST: PASS (3 tests)"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "RUNNABLE/0"
+
+t "a crash after progress: reset-executing restores the approval"
+mk G; approve "$P"; "$PS" set "$P" status executing >/dev/null
+log_progress "$P" "- Task 1: DONE — files a.py"
+run "$PS" reset-executing "$P"
+assert_eq "$CODE" "0" "exit"; assert_status "$P" approved
+run "$PS" check "$P"; assert_eq "$OUT" "RUNNABLE" "after reset"
+assert_contains "$(cat "$P")" "- Task 1: DONE — files a.py" "progress kept"
+
+t "a task edited above the progress line still invalidates the approval"
+mk G; approve "$P"; edit_approved "$P" "### Task 9: something new"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "STALE/11"
+
+t "a second progress line is tampering: check says STALE, stamp refuses"
+mk G; approve "$P"; edit_approved "$P" "$PROGRESS"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "STALE/11"
+assert_contains "$ERR" "more than one" "message"
+cp "$P" "$SB/orig"
+run "$PS" stamp "$P"
+assert_eq "$CODE" "3" "stamp exit"; assert_same "$P" "$SB/orig" "plan after refused stamp"
+
+t "re-stamp keeps the one progress section and what it logged"
+mk G; log_progress "$P" "- Task 1: DONE"
+"$PS" stamp "$P" >/dev/null
+assert_eq "$(grep -c "^$PROGRESS" "$P")" "1" "one progress line"
+assert_contains "$(cat "$P")" "- Task 1: DONE" "log kept"
+assert_eq "$("$PS" get "$P" plan_hash)" "sha256:$(approvedhash)" "same approved hash"
+
+t "stamp refuses a plan whose approved part is empty"
+printf '%s\n%s\n- Task 1: DONE\n' "$PROGRESS" "## Progress" > plans/E.plan.md; cp plans/E.plan.md "$SB/orig"
+run "$PS" stamp plans/E.plan.md
+assert_eq "$CODE" "3" "exit"; assert_contains "$ERR" "empty plan body"
+assert_same plans/E.plan.md "$SB/orig" "plan after refused stamp"
 
 finish

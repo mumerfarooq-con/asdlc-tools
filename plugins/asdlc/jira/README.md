@@ -58,9 +58,13 @@ plan_hash: sha256:...    <-- tool-managed, don't touch
 ...
 -->
 <the plan>
+<!-- asdlc:progress -->
+## Progress
 ```
 Read the plan, change `status: pending` to `status: approved`, save. That's the whole gate.
-- Don't hand-edit the plan body: it breaks the hash and the next run refuses it as STALE. If you
+- The hash covers the plan above the `<!-- asdlc:progress -->` line. A run logs each task's status,
+  notes and test results in the Progress section below it, so logging never voids your approval.
+- Don't hand-edit the plan above that line: it breaks the hash and the next run refuses it as STALE. If you
   really want to edit it, re-stamp it (`plan-state.sh stamp ./plans/<KEY>.plan.md` — resets it to
   pending over your edit), then approve.
 - To skip a ticket permanently, set `status: skip` (or delete the file).
@@ -77,19 +81,27 @@ Read the plan, change `status: pending` to `status: approved`, save. That's the 
 /asdlc:jira-run --reset-executing       # put plans stuck in `executing` back to approved
 ```
 Selection flags (`--key/--sprint/--status/--any-status/--anyone`) scope Phase B planning only;
-Phase A runs every approved plan regardless, and needs a clean working tree (tracked files) before
-each plan. Runs are serialized by a lock (`./plans/.jira-run.lock`).
+Phase A runs every approved plan regardless. Each plan runs on its own branch,
+`feature/<KEY>-<slug>`, cut from an up-to-date `TARGET_BRANCH` and recorded in the plan. A new
+plan needs a clean working tree (tracked files). Runs are serialized by a lock
+(`./plans/.jira-run.lock`) that records which run holds it and since when.
 
 The plugin pre-approves no commit, push or Bitbucket write. The command tells the agent to show
 each one and wait for your go, and the harness prompts for them unless your own permission
 settings allow them.
 
-After a crash:
-- `--reset-executing` runs `plan-state.sh reset-executing` on each plan left in `executing`. It
-  restores `approved` only if the plan body is unchanged; if the executor had already ticked a
-  task, the hash no longer matches, so re-stamp the plan and approve it again.
-- It does not touch the lock. A crashed run leaves `./plans/.jira-run.lock` behind, and you clear
-  it by hand with `rmdir ./plans/.jira-run.lock` once no run is going.
+### After a crash
+A crashed run leaves the lock held, and its plan `executing` on its branch with partial work.
+1. Clear the lock once you're sure no run is going. `run-state.sh status` shows who holds it and
+   since when; `run-state.sh force-unlock` removes it. The agent never runs `force-unlock` on its
+   own: run it yourself, or tell the agent to.
+2. `/asdlc:jira-run --reset-executing` puts each `executing` plan back to `approved`, as long as
+   the plan above the Progress line is unchanged. What the run logged doesn't count.
+3. The next run resumes each plan on the branch it recorded. Tasks whose Progress already shows
+   `TEST: PASS` are skipped, and the rest restart with the crashed run's partial work in place.
+
+A branch that exists but wasn't recorded by the plan is never reused or reset: that plan stops
+and is reported. If the plan above the Progress line did change, re-stamp it and approve it again.
 
 Finding a sprint ID: a bare number in `--sprint N` is the sprint's internal ID, not the board
 label. List IDs with `jira-sprints.sh`, or pass the exact name in quotes.
@@ -106,11 +118,14 @@ All read `.asdlc/jira.conf` (or `--conf <file>`), and all Jira/Bitbucket scripts
 plugin repo for the layout).
 - `jira-mine.sh` — list tickets to plan (`--key/--sprint/--status/--any-status/--anyone`).
 - `ticket-to-prd.sh` — one ticket → `./prds/<KEY>.md`.
+- `run-state.sh` — run lock and recovery: `lock | unlock <run-id> | status | force-unlock |
+  reset-executing | list | start-branch <plan> <summary>`.
 - `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing`. It
   lives in the plugin's shared `scripts/`, because `/asdlc:implement-prd` uses it outside Jira too.
 - `bb-open-pr.sh`, `bb-pr-comment.sh` — open a PR, comment on it.
 - `review-mode.sh` — council vs solo from the PR diff (files/lines/sensitive paths).
 - `jira-transition.sh` — move a ticket by status name, or `:todo :in-progress :testing :needs-info`.
+  If the ticket is already there it does nothing and exits 0, so a re-run doesn't fail.
 - `jira-notify.sh` — add `NOTIFY_ACCOUNT_IDS` as watchers + @mention comment.
 - `jira-sprints.sh` — list sprint IDs/names. `jira-people.sh` — list accountIds.
 - `jira-conf.sh` — print the resolved config. `jira-setup.sh` — `init | check | docs`.
