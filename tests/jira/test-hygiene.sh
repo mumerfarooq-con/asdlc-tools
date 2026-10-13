@@ -15,11 +15,11 @@ hits="$(grep -rnIE '[a-z0-9-]+\.atlassian\.net' "$P" --exclude-dir=templates | g
 assert_eq "$hits" "" "real Jira site URLs"
 
 t "no secret-looking values in the Jira leg"
-hits="$(grep -rnIE '(TOKEN|SECRET|PASSWORD)=[A-Za-z0-9_-]{8,}' "$P/jira" "$P/commands" || true)"
+hits="$(grep -rnIE '(TOKEN|SECRET|PASSWORD)=[A-Za-z0-9_-]{8,}' "$P/jira" "$P/scripts" "$P/commands" || true)"
 assert_eq "$hits" "" "hardcoded secrets"
 
 t "scripts are executable, use bash, and set strict mode"
-for f in "$P"/jira/scripts/*.sh; do
+for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh; do
   case "$f" in */lib.sh) continue ;; esac
   [ -x "$f" ] && ok || nok "$(basename "$f") not executable"
   [ "$(head -n1 "$f")" = "#!/usr/bin/env bash" ] && ok || nok "$(basename "$f") shebang"
@@ -27,8 +27,8 @@ for f in "$P"/jira/scripts/*.sh; do
   bash -n "$f" && ok || nok "$(basename "$f") syntax"
 done
 
-t "commands only reference scripts that exist"
-for ref in $(grep -ohE '\$\{CLAUDE_PLUGIN_ROOT\}/jira/scripts/[a-z-]+\.sh' "$P"/commands/*.md | sort -u); do
+t "commands only reference scripts that exist (jira/scripts and the shared scripts/)"
+for ref in $(grep -ohE '\$\{CLAUDE_PLUGIN_ROOT\}/(jira/)?scripts/[a-z-]+\.sh' "$P"/commands/*.md | sort -u); do
   [ -f "$P/${ref#\$\{CLAUDE_PLUGIN_ROOT\}/}" ] && ok || nok "missing $ref"
 done
 

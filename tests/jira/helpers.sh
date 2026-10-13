@@ -5,6 +5,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S="$ROOT/plugins/asdlc/jira/scripts"
+SHARED="$ROOT/plugins/asdlc/scripts"
 FIXTURES="$ROOT/tests/jira/fixtures"
 
 # Tests must never depend on (or leak) a developer's real Jira setup.

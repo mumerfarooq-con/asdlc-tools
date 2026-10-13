@@ -1,7 +1,7 @@
 ---
 description: Execute approved Jira plans, then plan new tickets (batched, file-based approval)
 argument-hint: "[PROJECT] | --key K | --sprint active|<id>|\"Name\" | --status \"A,B\" | --plan-only | --execute-only | --reset-executing"
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/ticket-to-prd.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh reset-executing:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git merge-base:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git check-ignore:*), Bash(ls:*), Bash(mkdir:*), Bash(rmdir:*), Skill(asdlc:implement-prd), Skill(asdlc:review-pr), Read
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/ticket-to-prd.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh reset-executing:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git merge-base:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git check-ignore:*), Bash(ls:*), Bash(mkdir:*), Bash(rmdir:*), Skill(asdlc:implement-prd), Skill(asdlc:review-pr), Read
 ---
 
 # /asdlc:jira-run
@@ -23,14 +23,14 @@ below; run them from the repo root. They read the project's `.asdlc/jira.conf` a
   by hand with `rmdir ./plans/.jira-run.lock` once no run is going.
 - Read the phase flags from the arguments: `--plan-only` (Phase B only), `--execute-only`
   (Phase A only), `--reset-executing` (before Phase A, for each plan whose status is `executing`,
-  run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh reset-executing <plan>`; it puts the plan back
+  run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh reset-executing <plan>`; it puts the plan back
   to `approved` only if its body hash still matches. On exit 11, report
   "<KEY>: changed during the crashed run — re-stamp and re-approve" and leave that plan alone).
   Everything else is a *selection* to hand to jira-mine in Phase B.
 
 ## Phase A — execute approved plans   (skip if --plan-only)
 List plan files: `ls ./plans/*.plan.md`. For each, run
-`${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh check <plan>` and act on the word it prints:
+`${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check <plan>` and act on the word it prints:
 - `RUNNABLE` → implement it (steps below).
 - `STALE` → skip; report "<KEY>: plan changed since approval — re-approve".
 - `EXECUTING` `PENDING` `DONE` `FAILED` `SKIP` `MISSING` → skip (mention EXECUTING/FAILED, stay quiet on the rest).
@@ -41,12 +41,12 @@ changes.
 
 To implement a RUNNABLE plan (KEY = its `ticket` field, read with `plan-state.sh get <plan> ticket`):
 1. `git checkout <TARGET_BRANCH> && git pull --ff-only && git checkout -B feature/<KEY>-<slug>`
-   then `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set <plan> branch feature/<KEY>-<slug>`
+   then `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> branch feature/<KEY>-<slug>`
 2. `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh <KEY> :in-progress`
 3. Run `/asdlc:implement-prd <plan> --execute` (Skill tool). It re-runs the gate and itself sets the
    plan to `executing`; you don't set it.
    - Gate failure (it reports a status other than RUNNABLE and STOPs) → report it, next plan.
-   - BLOCKED after it started → `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set <plan> status failed`
+   - BLOCKED after it started → `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status failed`
      (allowed because the status is `executing`), report, next plan.
 4. Commit, push, open PR (confirm each first):
    - Stage only the files the executor reported creating or modifying, plus their tests:
@@ -54,7 +54,7 @@ To implement a RUNNABLE plan (KEY = its `ticket` field, read with `plan-state.sh
      Never `git add -A` or `git add .`, and never stage `plans/`, `prds/`, `.asdlc/` or `.env*`.
    - `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-open-pr.sh feature/<KEY>-<slug> "<KEY> <summary>"`
      → capture `<PR_ID> <PR_URL>`
-   - `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set <plan> pr <PR_URL>`
+   - `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> pr <PR_URL>`
 5. Decide review depth from the DIFF, not a guess:
    `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh <TARGET_BRANCH> HEAD "<issue_type>" "<labels_csv>"`
    → prints `council` or `solo` (council when many files/lines changed, a sensitive path is
@@ -63,7 +63,7 @@ To implement a RUNNABLE plan (KEY = its `ticket` field, read with `plan-state.sh
    - REQUEST_CHANGES → executor fixes on the SAME plan (max 2 cycles), commit, push, re-run the review.
    - APPROVE → (confirm) post the approval summary:
      `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-pr-comment.sh <PR_ID> "<summary>"`.
-6. `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set <plan> status done`.
+6. `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status done`.
    Report: `<KEY> — <PR_URL> — approved, awaiting merge`.
    The ticket moves to Testing on MERGE (Jira automation), not here.
 

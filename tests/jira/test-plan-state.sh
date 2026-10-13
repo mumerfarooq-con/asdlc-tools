@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # plan-state.sh: header block, hash binding, states, transitions, injection, legacy markers.
 . "$(dirname "$0")/helpers.sh"
-PS="$S/plan-state.sh"
+PS="$SHARED/plan-state.sh"
 
 body() { printf '# PROJ-1: plan\n\n## Changes\n1. do it\n'; }
 bodyhash() { body | shasum -a 256 | awk '{print $1}'; }
