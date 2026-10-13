@@ -4,7 +4,20 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.1.1] - 2026-10-13
+
+First tagged release of the Jira leg (1.1.0 was merged but never tagged; its changes ship here).
+
+### Changed
+
+- `plan-state.sh` moved from `jira/scripts/` to the plugin's shared `scripts/`, since `/asdlc:implement-prd --plan-only` and `--execute` use it outside the Jira leg too. Commands reference the new path; nothing changes for anyone invoking the commands.
+- `/asdlc:implement-prd --plan-only` names the plan by a neutral plan id (the ticket key in the PRD title if there is one, else the PRD basename) and hands `prd-planner` the exact output path, so the planner and the command can't disagree on where the plan goes.
+
+[1.1.1]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.1.1
+
 ## [1.1.0] - 2026-10-08
+
+Merged to `main`, never tagged: first released as 1.1.1.
 
 ### Added
 
@@ -13,8 +26,6 @@ Every PR that changes plugin content (commands, agents, PDQC assets) must bump t
 - Per-project config `.asdlc/jira.conf` (`KEY=value`, parsed against an allowlist, never sourced) from `jira/templates/jira.conf`. Tokens stay in env vars (`JIRA_EMAIL`, `JIRA_TOKEN`, `BITBUCKET_TOKEN`). `/asdlc:jira-setup` pre-fills it from older in-repo env vars, checks tokens, makes test calls to Jira and Bitbucket, verifies workflow statuses, and creates `docs/access-rules.md` and `docs/known-traps.md` from templates.
 - Fixture mode (`--fixtures <dir>`) on every Jira/Bitbucket script, and an offline test suite (`tests/jira/run.sh`) run in CI.
 - `/asdlc:implement-prd --plan-only` (plan, stamp, stop for approval) and `--execute <plan>` (run only a plan that checks RUNNABLE). The default pipeline mode is unchanged apart from the foreground-subagent rule.
-
-[1.1.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.1.0
 
 ## [1.0.0] - 2026-07-24
 

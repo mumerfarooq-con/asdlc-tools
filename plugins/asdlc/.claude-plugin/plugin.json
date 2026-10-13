@@ -1,6 +1,6 @@
 {
   "name": "asdlc",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "PRD Implementor, PR Review, PDQC, Jira leg — commands and subagents",
   "author": { "name": "Conovo Platform" }
 }

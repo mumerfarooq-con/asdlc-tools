@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deterministic state + hashing for /asdlc:jira-run plan files.
-# Header block (HTML comment) at the TOP of ./plans/<KEY>.plan.md:
+# Deterministic state + hashing for plan files (/asdlc:implement-prd --plan-only and
+# --execute, /asdlc:jira-run). Header block (HTML comment) at the TOP of ./plans/<ID>.plan.md:
 #   <!-- asdlc
 #   ticket: PROJ-142
 #   status: pending          # you change this to: approved

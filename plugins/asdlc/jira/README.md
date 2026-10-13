@@ -106,7 +106,8 @@ All read `.asdlc/jira.conf` (or `--conf <file>`), and all Jira/Bitbucket scripts
 plugin repo for the layout).
 - `jira-mine.sh` — list tickets to plan (`--key/--sprint/--status/--any-status/--anyone`).
 - `ticket-to-prd.sh` — one ticket → `./prds/<KEY>.md`.
-- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing`.
+- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing`. It
+  lives in the plugin's shared `scripts/`, because `/asdlc:implement-prd` uses it outside Jira too.
 - `bb-open-pr.sh`, `bb-pr-comment.sh` — open a PR, comment on it.
 - `review-mode.sh` — council vs solo from the PR diff (files/lines/sensitive paths).
 - `jira-transition.sh` — move a ticket by status name, or `:todo :in-progress :testing :needs-info`.

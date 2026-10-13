@@ -1,7 +1,7 @@
 ---
 description: Orchestrate PRD implementation (plan → execute → review → test), plan only and stop for file-based approval, execute an approved plan, or run a retrospective review of an already-completed PRD
 argument-hint: <path-to-prd | path-to-plan> [--plan-only | --execute | --review-only]
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*)
 ---
 
 You are orchestrating work for: $ARGUMENTS
@@ -37,21 +37,23 @@ You coordinate only — route all planning, coding, review, and testing through 
 
 ## Plan-only mode (--plan-only) — produce a plan and STOP
 Nothing is implemented in this mode. Approval is not interactive; it lives in the plan file.
-1. Invoke `prd-planner` on the PRD. Write the plan to `./plans/<KEY>.plan.md`, where `<KEY>` is
-   the ticket key from the PRD's title (fall back to the PRD file's basename).
+1. Pick the plan id `<ID>`: the ticket key in the PRD's title if it has one (e.g. `PROJ-142`),
+   else the PRD file's basename. Invoke `prd-planner` on the PRD and tell it the exact output
+   path: `./plans/<ID>.plan.md`.
    - If `STATUS: BLOCKED`, surface the open questions and STOP.
-2. Stamp it: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh stamp ./plans/<KEY>.plan.md <KEY>`
+2. Stamp it: `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp ./plans/<ID>.plan.md <ID>`
    (writes the header block: `status: pending` + a hash of the plan body).
 3. Tell the user the plan is written and awaiting approval. To approve: open the file, read the
    plan, and set `status: approved` in the header block — then run
-   `/asdlc:implement-prd ./plans/<KEY>.plan.md --execute` (or let `/asdlc:jira-run` pick it up). STOP.
+   `/asdlc:implement-prd ./plans/<ID>.plan.md --execute` (`/asdlc:jira-run` also picks up approved
+   plans for Jira tickets). STOP.
 
 ## Execute mode (--execute) — run an approved plan
-1. **Gate:** run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh check <plan>`.
+1. **Gate:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check <plan>`.
    - Output `RUNNABLE` → go to step 2.
    - Anything else (`PENDING` `STALE` `EXECUTING` `DONE` `FAILED` `SKIP` `MISSING`) → report it and STOP.
      Never implement a plan that is not RUNNABLE.
-2. **Start:** run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/plan-state.sh set <plan> status executing`.
+2. **Start:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status executing`.
    This command owns that transition, so the caller never sets it first. If it refuses, report why and STOP.
 3. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan.
 4. **Wrap up** — exactly as in Pipeline mode step 3.
