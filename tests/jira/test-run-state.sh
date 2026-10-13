@@ -120,6 +120,7 @@ assert_eq "$(branch_now)" "main" "stayed on main"; assert_eq "$("$PS" get plans/
 t "start-branch: a recorded branch that is gone stops the plan (exit 14)"
 plan PROJ-6; "$PS" set plans/PROJ-6.plan.md branch feature/PROJ-6-deleted >/dev/null
 run "$RS" start-branch plans/PROJ-6.plan.md "x"; assert_eq "$CODE" "14" "exit"; assert_contains "$ERR" "no longer exists"
+assert_contains "$ERR" "re-stamp and re-approve" "advice"
 
 t "start-branch: refuses a plan that isn't RUNNABLE, and a bad target branch"
 plan PROJ-7 pending
@@ -127,5 +128,54 @@ run "$RS" start-branch plans/PROJ-7.plan.md "x"; assert_eq "$CODE" "2" "pending 
 git_sandbox 'TARGET_BRANCH=-upload-pack'; plan PROJ-8
 run "$RS" start-branch plans/PROJ-8.plan.md "x"; assert_eq "$CODE" "2" "option-like target"
 assert_eq "$(branch_now)" "main" "nothing checked out"
+
+t "start-branch: a log with no recorded branch stops the plan (exit 15); a re-stamp starts fresh"
+git_sandbox; plan PROJ-10
+B="$("$RS" start-branch plans/PROJ-10.plan.md "log me" 2>/dev/null)"
+printf -- '- Task 1: TEST PASS — done\n' >> plans/PROJ-10.plan.md
+"$PS" set plans/PROJ-10.plan.md branch "" >/dev/null; git checkout -q main; git branch -qD "$B"
+run "$RS" start-branch plans/PROJ-10.plan.md "log me"
+assert_eq "$CODE" "15" "exit"; assert_contains "$ERR" "re-stamp and re-approve"
+assert_eq "$(branch_now)" "main" "HEAD unchanged"
+assert_eq "$(git branch --list 'feature/*')" "" "no branch created"
+"$PS" stamp plans/PROJ-10.plan.md >/dev/null 2>&1; human_status plans/PROJ-10.plan.md approved
+run "$RS" start-branch plans/PROJ-10.plan.md "log me"
+assert_eq "$CODE/$OUT" "0/$B" "fresh branch after re-stamp"
+
+t "start-branch: a recorded branch must be this ticket's feature branch, never the target (exit 2)"
+git checkout -q main; plan PROJ-11
+"$PS" set plans/PROJ-11.plan.md branch main >/dev/null
+run "$RS" start-branch plans/PROJ-11.plan.md "x"; assert_eq "$CODE" "2" "target branch"
+assert_eq "$(branch_now)" "main" "HEAD unchanged"
+git branch feature/PROJ-9-x
+"$PS" set plans/PROJ-11.plan.md branch feature/PROJ-9-x >/dev/null
+run "$RS" start-branch plans/PROJ-11.plan.md "x"; assert_eq "$CODE" "2" "another key's branch"
+assert_contains "$ERR" "feature/PROJ-11-"; assert_eq "$(branch_now)" "main" "HEAD unchanged"
+
+t "start-branch: if checkout -b fails the recorded branch is cleared again"
+plan PROJ-12
+git branch feature/PROJ-12-x/y                      # a ref below the name makes 'checkout -b' fail
+run "$RS" start-branch plans/PROJ-12.plan.md "x"
+[ "$CODE" -ne 0 ] && ok || nok "expected a failure"
+assert_eq "$("$PS" get plans/PROJ-12.plan.md branch)" "" "branch field cleared"
+assert_eq "$(branch_now)" "main" "stayed on main"
+
+t "start-branch: no upstream on the target branch -> could not fast-forward"
+git_sandbox; git branch -q --unset-upstream; plan PROJ-13
+run "$RS" start-branch plans/PROJ-13.plan.md "x"
+[ "$CODE" -ne 0 ] && ok || nok "expected a failure"; assert_contains "$ERR" "could not fast-forward"
+
+t "reset-executing and list: an executing plan that checks STALE is reported and refused"
+git_sandbox; plan PROJ-14; "$PS" set plans/PROJ-14.plan.md status executing >/dev/null
+printf '<!-- asdlc:progress -->\n' >> plans/PROJ-14.plan.md      # a second progress line
+run "$RS" reset-executing; assert_eq "$CODE" "11" "exit"
+assert_contains "$OUT" "PROJ-14: executing but STALE — delete the extra progress line"
+run "$RS" list; assert_contains "$OUT" "STALE (executing)"
+
+t "list: a plan with no branch and no pr keeps four aligned columns"
+git_sandbox; plan PROJ-15; plan PROJ-16; "$PS" set plans/PROJ-16.plan.md branch feature/PROJ-16-x >/dev/null
+run "$RS" list
+assert_eq "$(printf '%s\n' "$OUT" | awk 'NF!=4' | wc -l | tr -d ' ')" "0" "every row has 4 fields"
+assert_contains "$OUT" "-"
 
 finish

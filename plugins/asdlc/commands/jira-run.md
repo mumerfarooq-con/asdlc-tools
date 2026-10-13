@@ -1,7 +1,7 @@
 ---
 description: Execute approved Jira plans, then plan new tickets (batched, file-based approval)
 argument-hint: "[PROJECT] | --key K | --sprint active|<id>|\"Name\" | --status \"A,B\" | --plan-only | --execute-only | --reset-executing"
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/ticket-to-prd.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh lock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh unlock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh status:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh reset-executing:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh list:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh start-branch:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh:*), Bash(git status:*), Bash(git add:*), Bash(ls:*), Skill(asdlc:implement-prd), Skill(asdlc:review-pr), Read
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/ticket-to-prd.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh lock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh unlock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh reset-executing:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh start-branch:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh:*), Bash(git status:*), Bash(git add:*), Bash(ls:*), Skill(asdlc:implement-prd), Skill(asdlc:review-pr), Read
 ---
 
 # /asdlc:jira-run
@@ -43,6 +43,9 @@ To implement a RUNNABLE plan (KEY = its `ticket` field, read with `plan-state.sh
    - Exit 12 (uncommitted changes outside the plan's own branch) → STOP Phase A and report it.
    - Exit 13 (the branch exists but this plan didn't create it) or 14 (the plan's branch is gone)
      → report what it says, next plan. Never delete, reset or reuse a branch yourself.
+   - Exit 15 (progress logged on a gone or cleared branch) → report it, next plan. The plan needs
+     a re-stamp and my re-approval; never clear its log or branch yourself.
+   - Any other non-zero exit (2 refusal, 1 git failure) → report what it says, next plan.
 2. `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh <KEY> :in-progress`
 3. Run `/asdlc:implement-prd <plan> --execute` (Skill tool). It re-runs the gate and itself sets the
    plan to `executing`; you don't set it. On a resumed plan it skips the tasks its Progress
@@ -50,13 +53,21 @@ To implement a RUNNABLE plan (KEY = its `ticket` field, read with `plan-state.sh
    - Gate failure (it reports a status other than RUNNABLE and STOPs) → report it, next plan.
    - BLOCKED after it started → `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status failed`
      (allowed because the status is `executing`), report, next plan.
-4. Commit, push, open PR (confirm each first):
+4. Commit, push, open PR (confirm each first). Every part checks first, so this step is safe to
+   re-run after a crash at any point:
+   - Read `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get <plan> pr`. If it is non-empty, the PR
+     already exists (a resumed run that crashed past PR creation): never call `bb-open-pr.sh`
+     again, take `<PR_ID>` from the recorded URL (its last path segment) and `<PR_URL>` from the
+     plan, and apply only the commit and push checks below before continuing at step 5.
    - Stage only the files the executor reported creating or modifying, plus their tests:
-     `git add -- <path> ...`, then `git commit -m "<KEY> <summary>"` ; `git push -u origin <BRANCH>`.
-     Never `git add -A` or `git add .`, and never stage `plans/`, `prds/`, `.asdlc/` or `.env*`.
-   - `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-open-pr.sh <BRANCH> "<KEY> <summary>"`
-     → capture `<PR_ID> <PR_URL>`
-   - `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> pr <PR_URL>`
+     `git add -- <path> ...`. Never `git add -A` or `git add .`, and never stage `plans/`,
+     `prds/`, `.asdlc/` or `.env*`. Then commit only if `git status --short` shows something
+     staged: `git commit -m "<KEY> <summary>"`.
+   - Push only if `git status -sb` shows the branch ahead of its upstream (or with none yet):
+     `git push -u origin <BRANCH>`.
+   - Only when no PR is recorded: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-open-pr.sh <BRANCH> "<KEY> <summary>"`
+     → capture `<PR_ID> <PR_URL>`, then at once
+     `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> pr <PR_URL>`
 5. Decide review depth from the DIFF, not a guess:
    `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh <TARGET_BRANCH> HEAD "<issue_type>" "<labels_csv>"`
    → prints `council` or `solo` (council when many files/lines changed, a sensitive path is

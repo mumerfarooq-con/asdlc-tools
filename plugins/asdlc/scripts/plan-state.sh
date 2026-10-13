@@ -17,19 +17,27 @@
 # those are read the same way and get the current marker the next time they are stamped.
 #
 # Usage:
-#   plan-state.sh stamp <plan> [ticket]      # (re)write block: status=pending, fresh hash
+#   plan-state.sh stamp <plan> [ticket]      # (re)write block: status=pending, fresh hash, empty log
 #   plan-state.sh check <plan>               # RUNNABLE|PENDING|STALE|EXECUTING|DONE|FAILED|SKIP|MISSING
 #   plan-state.sh set   <plan> <field> <val> # field: status|branch|pr
 #   plan-state.sh reset-executing <plan>     # crashed run: executing -> approved, only if the body is unchanged
 #   plan-state.sh get   <plan> <field>
 #
-# plan_hash covers only the approved part: the body up to the "<!-- asdlc:progress -->" line.
-# Agents log a run's progress below that line, so ticking tasks never invalidates the approval
-# and a crashed run can be resumed. A plan without the line is hashed whole (older plans keep
-# their hashes); stamp adds the line and an empty "## Progress" section.
+# The contract: above the progress line is everything a human signs off on (M2's Critic notes
+# and Open-question answers included); below it is only the machine run log, never a source of
+# work. stamp places the line (and refuses a plan that already has one, so plan templates must
+# not contain it); M2's approve will recompute the hash over the part above the line.
+# plan_hash covers only the approved part, the body up to the progress line, taken as sha256 of
+# "asdlc-plan-v2\n" + that part. Agents log a run's progress below the line, so ticking tasks
+# never invalidates the approval and a crashed run can be resumed. A plan with no line (stamped
+# before 1.2.0) keeps the plain whole-body hash and stays RUNNABLE; once such a plan gains a
+# line it is STALE, because the line is never hashed the legacy way again. A progress line is
+# any line matching: optional blanks, <!--, asdlc:progress, -->, optional blanks or CR.
+# Re-stamping is a new approval and a new run, so it empties the log.
 #
-# Approval is a human edit of the plan file. Nothing callable here can set "approved"
-# except reset-executing, which only undoes an executing run whose body hash still matches.
+# Approval is a human edit of the plan file. "set status approved" is refused, but
+# reset-executing restores approved for a plan whose header says executing and whose approved
+# part is unchanged. A real guarantee needs M2's human-only approve and a run record.
 # "set <plan> status <v>" refuses (exit 2) unless the move is allowed:
 #   approved               never
 #   executing              only while check says RUNNABLE (approved + hash matches)
@@ -77,9 +85,17 @@ body_of() {
 
 # The approved part of a body on stdin: every line before the progress line. The hash is taken
 # over this, so everything a run logs below the line stays outside the approval.
-approved_part() { awk '/^<!-- asdlc:progress -->[ \t]*$/ {exit} {print}'; }
+PROGRESS_AWK='^[ \t]*<!--[ \t]*asdlc:progress[ \t]*-->[ \t\r]*$'
+approved_part() { awk -v re="$PROGRESS_AWK" '$0 ~ re {exit} {print}'; }
 
-progress_count() { body_of "$1" | awk '/^<!-- asdlc:progress -->[ \t]*$/ {n++} END {print n+0}'; }
+progress_count() { body_of "$1" | awk -v re="$PROGRESS_AWK" '$0 ~ re {n++} END {print n+0}'; }
+
+# Hash of a body on stdin; $1 = number of progress lines in it. With a line: the v2 form over
+# the approved part. Without: the legacy whole-body hash, byte-identical to pre-1.2.0.
+hash_body() {
+  if [ "$1" -gt 0 ]; then { printf 'asdlc-plan-v2\n'; approved_part; } | sha
+  else approved_part | sha; fi
+}
 
 # Does the file have a closing "-->" line (same pattern body_of uses)?
 has_close() { awk '/^-->[ \t]*$/ {f=1} END{exit !f}' "$1"; }
@@ -106,13 +122,13 @@ compute_state() {
   # A second progress line could move part of the approved plan out of the hash.
   if [ "$(progress_count "$plan")" -gt 1 ]; then
     STATE=STALE; STATE_CODE=11
-    STATE_MSG="  more than one '$PROGRESS' line — re-stamp and re-approve"
+    STATE_MSG="  more than one '$PROGRESS' line — delete the extra line, then re-approve"
     return 0
   fi
   local st
   st="$(hdr_get "$plan" status)"
   STORED_HASH="$(hdr_get "$plan" plan_hash)"; STORED_HASH="${STORED_HASH#sha256:}"
-  CUR_HASH="$(body_of "$plan" | approved_part | sha)"
+  CUR_HASH="$(body_of "$plan" | hash_body "$(progress_count "$plan")")"
   case "$st" in
     approved) if [ "$CUR_HASH" = "$STORED_HASH" ]; then STATE=RUNNABLE; STATE_CODE=0
               else STATE=STALE; STATE_CODE=11
@@ -157,18 +173,37 @@ case "$cmd" in
       die 3 "header block not closed in $plan — no line is exactly '-->' at column 0; nothing written"
     fi
     btmp="$(mktemp)"; body_of "$plan" > "$btmp"
-    if [ "$(progress_count "$plan")" -gt 1 ]; then
+    pc="$(progress_count "$plan")"
+    if [ "$pc" -gt 1 ]; then
       die 3 "more than one '$PROGRESS' line in $plan — keep exactly one, after the plan; nothing written"
+    fi
+    if [ "$pc" -eq 1 ] && ! has_block "$plan"; then
+      die 3 "stamp adds the progress line itself; remove it from the plan; nothing written"
     fi
     if [ -z "$(approved_part < "$btmp" | LC_ALL=C tr -d ' \t\r\n\f\v')" ]; then
       die 3 "empty plan body in $plan — nothing to stamp; nothing written"
     fi
-    # Give the run a fixed place to log progress, outside the approved part.
-    if [ "$(progress_count "$plan")" -eq 0 ]; then
+    if [ "$pc" -eq 0 ]; then
+      # Give the run a fixed place to log progress, outside the approved part.
       { if [ -n "$(tail -n1 "$btmp")" ]; then echo; fi
         printf '%s\n' "$PROGRESS" '## Progress'; } >> "$btmp"
+    else
+      # Re-stamp: the line must be followed by "## Progress" and then the log. The log is dropped
+      # because a re-stamp is a new approval and a new run.
+      dropped="$(awk -v re="$PROGRESS_AWK" '
+        f==0 && $0 ~ re {f=1; next}
+        f==1 && $0 ~ /^[ \t\r]*$/ {next}
+        f==1 {if ($0 ~ /^## Progress[ \t\r]*$/) {f=2; next} else {f=-1; exit}}
+        f==2 && $0 !~ /^[ \t\r]*$/ {n++}
+        END {if (f==-1 || f==1) print "bad"; else print n+0}' "$btmp")"
+      if [ "$dropped" = bad ]; then
+        die 3 "the '$PROGRESS' line in $plan must be followed by '## Progress' — fix or remove it; nothing written"
+      fi
+      { approved_part < "$btmp"; printf '%s\n' "$PROGRESS" '## Progress'; } > "$btmp.new"
+      mv "$btmp.new" "$btmp"
+      if [ "$dropped" -gt 0 ]; then echo "dropped $dropped progress log line(s)" >&2; fi
     fi
-    h="$(approved_part < "$btmp" | sha)"
+    h="$(hash_body 1 < "$btmp")"
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     otmp="$(mktemp)"
     { printf '%s\n' "$MARKER"
@@ -212,7 +247,8 @@ case "$cmd" in
         executing)
           [ "$STATE" = RUNNABLE ] || die 2 "refusing: executing needs a RUNNABLE plan (this one is $STATE)" ;;
         done|failed)
-          [ "$STATE" = EXECUTING ] || die 2 "refusing: '$val' only follows executing (this plan is $STATE)" ;;
+          # failed never enables execution, so it is also allowed from executing + STALE.
+          [ "$STATE" = EXECUTING ] || { [ "$val" = failed ] && [ "$STATE" = STALE ] && [ "$(hdr_get "$plan" status)" = executing ]; } || die 2 "refusing: '$val' only follows executing (this plan is $STATE)" ;;
       esac
     fi
     write_field "$field" "$val"

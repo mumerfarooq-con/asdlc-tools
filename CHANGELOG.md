@@ -8,16 +8,20 @@ Every PR that changes plugin content (commands, agents, PDQC assets) must bump t
 
 ### Added
 
-- **Resumable Jira runs.** A stamped plan now has a Progress section after an `<!-- asdlc:progress -->` line, and the approval hash covers only the plan above that line. The executor, reviewer and tester log task status, notes and verdicts there instead of inside the tasks, so a run's own logging never voids the approval. After a crash, `--reset-executing` restores the approval and the next run resumes on the plan's branch, skipping tasks that already passed their tests. Plans stamped before this release keep their hashes.
+- **Resumable Jira runs.** A stamped plan now has a Progress section after an `<!-- asdlc:progress -->` line, and the approval hash covers only the plan above that line. The executor, reviewer and tester log task status, notes and verdicts there instead of inside the tasks, so a run's own logging never voids the approval. After a crash, `--reset-executing` restores the approval and the next run resumes on the plan's branch, skipping tasks that already passed their tests. Plans stamped before this release keep their hashes until they gain a progress line, which then makes them STALE: they restart from scratch after a re-stamp and re-approval.
+- `scripts/plan-state.sh`:
+  - The hash is versioned: with a progress line it is the sha256 of `asdlc-plan-v2` plus the part above the line, so a line inserted into an approved plan can't hide text below it.
+  - `stamp` owns the progress line and refuses a plan that already contains one. A re-stamp is a new approval and a new run, so it empties the Progress log.
 - `jira/scripts/run-state.sh`:
   - `lock` / `unlock <run-id>` / `status` hold the run lock, which records which run holds it and since when.
   - `force-unlock` is human-only and never pre-approved.
   - `reset-executing` and `list` work across all plans.
+  - `start-branch` exits 15 when a plan has logged progress but its branch is gone or was cleared (re-stamp and re-approve). A resumed branch must be `feature/<KEY>-*` for the plan's own ticket and not the target branch, and the branch is recorded before it is created.
   - `start-branch` creates `feature/<KEY>-<slug>` off an up-to-date target branch, or resumes the branch the plan recorded. It never reuses or resets a branch the plan didn't record, and it reduces the ticket summary to `[a-z0-9-]` before using it in the branch name.
 
 ### Changed
 
-- `jira-transition.sh` does nothing and exits 0 when the ticket is already in the target status, so a re-run doesn't fail on In Progress.
+- `jira-transition.sh` does nothing and exits 0 when the ticket is already in the target status (compared case-insensitively), so a re-run doesn't fail on In Progress.
 - `/asdlc:jira-run` pre-approves only `git status` and `git add`: the branch setup moved into `run-state.sh start-branch`, which runs fixed git commands.
 - `prd-executor`, `prd-reviewer` and `prd-tester` write to the Progress section when a plan has one. Plans without it, such as those from the default `/asdlc:implement-prd` pipeline, are updated in place as before.
 

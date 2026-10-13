@@ -8,7 +8,8 @@ bodyhash() { body | shasum -a 256 | awk '{print $1}'; }
 # stamp appends a blank line, the progress line and "## Progress"; the hash covers the body
 # plus that blank line, i.e. everything above the progress line.
 PROGRESS='<!-- asdlc:progress -->'
-approvedhash() { { body; echo; } | shasum -a 256 | awk '{print $1}'; }
+# plan_hash is sha256("asdlc-plan-v2\n" + approved part), computed here independently.
+approvedhash() { { printf 'asdlc-plan-v2\n'; body; echo; } | shasum -a 256 | awk '{print $1}'; }
 stamped_body() { body; echo; echo "$PROGRESS"; echo "## Progress"; }
 # Edit the approved part: insert a line just above the progress line (or append if none).
 edit_approved() {  # <plan> <line>
@@ -344,15 +345,79 @@ cp "$P" "$SB/orig"
 run "$PS" stamp "$P"
 assert_eq "$CODE" "3" "stamp exit"; assert_same "$P" "$SB/orig" "plan after refused stamp"
 
-t "re-stamp keeps the one progress section and what it logged"
-mk G; log_progress "$P" "- Task 1: DONE"
-"$PS" stamp "$P" >/dev/null
+t "re-stamp keeps one progress section but empties what it logged (MF-2)"
+mk G; log_progress "$P" "- Task 1: TEST PASS — ok"; log_progress "$P" "- Task 2: EXECUTOR DONE — x"
+run "$PS" stamp "$P"
+assert_eq "$CODE" "0" "exit"
+assert_contains "$ERR" "dropped 2 progress log line(s)" "stderr"
 assert_eq "$(grep -c "^$PROGRESS" "$P")" "1" "one progress line"
-assert_contains "$(cat "$P")" "- Task 1: DONE" "log kept"
+assert_not_contains "$(cat "$P")" "TEST PASS" "log emptied"
+assert_eq "$(sed '1,/^-->$/d' "$P")" "$(stamped_body)" "body, canonical line, empty section"
 assert_eq "$("$PS" get "$P" plan_hash)" "sha256:$(approvedhash)" "same approved hash"
+mk G; run "$PS" stamp "$P"
+assert_eq "$ERR" "" "no drop message for an empty log"
+
+t "the stored hash is the v2 hash of the approved part"
+mk G
+want="$({ printf 'asdlc-plan-v2\n'; sed '1,/^-->$/d' "$P" | awk -v p="$PROGRESS" '$0==p {exit} {print}'; } | shasum -a 256 | awk '{print $1}')"
+assert_eq "$("$PS" get "$P" plan_hash)" "sha256:$want" "v2 hash"
+legacy="$(sed '1,/^-->$/d' "$P" | awk -v p="$PROGRESS" '$0==p {exit} {print}' | shasum -a 256 | awk '{print $1}')"
+[ "$("$PS" get "$P" plan_hash)" != "sha256:$legacy" ] && ok || nok "hash is still the legacy form"
+
+t "MF-1: first stamp refuses a progress line already in the body (fenced, plain, CRLF)"
+for kind in fenced plain crlf indented; do
+  case "$kind" in
+    fenced)   { body; printf '```\n%s\n```\n3. below\n' "$PROGRESS"; } > plans/M.plan.md ;;
+    plain)    { body; printf '%s\n3. below\n' "$PROGRESS"; } > plans/M.plan.md ;;
+    crlf)     { body; printf '%s\r\n## Progress\r\n' "$PROGRESS"; } > plans/M.plan.md ;;
+    indented) { body; printf '  %s \n3. below\n' "$PROGRESS"; } > plans/M.plan.md ;;
+  esac
+  cp plans/M.plan.md "$SB/orig"
+  run "$PS" stamp plans/M.plan.md
+  assert_eq "$CODE" "3" "$kind exit"
+  assert_contains "$ERR" "stamp adds the progress line itself" "$kind message"
+  assert_same plans/M.plan.md "$SB/orig" "$kind plan after refused stamp"
+done
+
+t "MF-1: re-stamp with the line followed by something other than ## Progress -> exit 3, unchanged"
+mk G; { sed '/^## Progress$/,$d' "$P"; printf '## Tasks\n- Task 1: a\n'; } > "$P.tmp" && mv "$P.tmp" "$P"; cp "$P" "$SB/orig"
+run "$PS" stamp "$P"
+assert_eq "$CODE" "3" "exit"; assert_contains "$ERR" "## Progress" "message"
+assert_same "$P" "$SB/orig" "plan after refused re-stamp"
+mk G; { sed '/^## Progress$/,$d' "$P"; printf '\n\n## Progress\n- Task 1: TEST PASS\n'; } > "$P.tmp" && mv "$P.tmp" "$P"
+run "$PS" stamp "$P"; assert_eq "$CODE" "0" "blank lines before the heading are fine"
+
+t "probe: stamp, approve, then a fenced progress line mid-plan hides an edited task -> not RUNNABLE"
+mk G; approve "$P"
+awk '/^2\. |^1\. do it/ && !d {print; print "```"; print "'"$PROGRESS"'"; print "```"; d=1; next} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
+printf '3. sneak in below the fake line\n' > "$SB/add"
+awk -v add="$(cat "$SB/add")" '{print} /^```$/ {c++; if (c==2) print add}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
+run "$PS" check "$P"
+assert_eq "$OUT/$CODE" "STALE/11" "state"
+run "$PS" set "$P" status executing; assert_eq "$CODE" "2" "executing refused"
+
+t "SF-1: a legacy approved plan (no line, plain body hash) is RUNNABLE; with the line and a new task it is STALE"
+{ echo "<!-- asdlc"; echo "ticket: PROJ-8"; echo "status: approved"
+  echo "plan_hash: sha256:$(bodyhash)"; echo "branch:"; echo "pr:"
+  echo "updated: 2026-01-01T00:00:00Z"; echo "-->"; body; } > plans/L.plan.md
+run "$PS" check plans/L.plan.md; assert_eq "$OUT/$CODE" "RUNNABLE/0" "legacy"
+{ echo "3. appended task"; echo "$PROGRESS"; echo "## Progress"; } >> plans/L.plan.md
+run "$PS" check plans/L.plan.md; assert_eq "$OUT/$CODE" "STALE/11" "legacy plan that gained a line"
+sed 's/^3\. appended task$//' plans/L.plan.md > plans/L2.plan.md
+run "$PS" check plans/L2.plan.md; assert_eq "$OUT" "STALE" "even without a new task the v2 hash differs"
+
+t "N-1: executing + duplicated progress line (STALE): set failed works, executing does not"
+mk G; approve "$P"; "$PS" set "$P" status executing >/dev/null
+edit_approved "$P" "$PROGRESS"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "STALE/11"
+assert_contains "$ERR" "delete the extra" "message"
+assert_not_contains "$ERR" "re-stamp" "message no longer says re-stamp"
+run "$PS" set "$P" status failed; assert_eq "$CODE" "0" "failed from executing+STALE"
+mk G; approve "$P"; edit_approved "$P" "$PROGRESS"
+run "$PS" set "$P" status failed; assert_eq "$CODE" "2" "failed from approved+STALE still refused"
 
 t "stamp refuses a plan whose approved part is empty"
-printf '%s\n%s\n- Task 1: DONE\n' "$PROGRESS" "## Progress" > plans/E.plan.md; cp plans/E.plan.md "$SB/orig"
+printf '<!-- asdlc\nticket: PROJ-4\nstatus: approved\n-->\n%s\n%s\n- Task 1: DONE\n' "$PROGRESS" "## Progress" > plans/E.plan.md; cp plans/E.plan.md "$SB/orig"
 run "$PS" stamp plans/E.plan.md
 assert_eq "$CODE" "3" "exit"; assert_contains "$ERR" "empty plan body"
 assert_same plans/E.plan.md "$SB/orig" "plan after refused stamp"

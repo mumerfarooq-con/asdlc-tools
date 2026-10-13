@@ -20,15 +20,17 @@
 #
 # Exit codes: 0 ok; 2 bad input or refused; 10 the lock is held; 11 reset-executing refused
 # some plan (its approved part changed); 12 the working tree has uncommitted changes;
-# 13 the branch exists but this plan didn't record it; 14 the plan's recorded branch is gone.
+# 13 the branch exists but this plan didn't record it; 14 the plan's recorded branch is gone;
+# 15 the plan has logged progress but records no branch (the branch is gone or was cleared).
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 ASDLC_CONF_OPTIONAL=1 asdlc_init "$@"; set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
-PS="$ASDLC_JIRA_HOME/../scripts/plan-state.sh"
+PS="$ASDLC_SHARED_SCRIPTS/plan-state.sh"
 PLANS="./plans"
 LOCK="$PLANS/.jira-run.lock"
 
 die() { echo "$2" >&2; exit "$1"; }
+plan_id() { local i; i="$("$PS" get "$1" ticket 2>/dev/null || true)"; echo "${i:-$(basename "$1" .plan.md)}"; }
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 owner_field() { [ -f "$LOCK/owner" ] && awk -v k="$1:" '$1==k {sub(/^[^:]*:[ \t]*/,""); print; exit}' "$LOCK/owner"; return 0; }
 
@@ -66,7 +68,7 @@ case "$cmd" in
     fi
     id="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"
     { echo "run_id: $id"; echo "started: $(now_iso)"; echo "started_epoch: $(date +%s)"
-      echo "host: $(hostname 2>/dev/null || echo unknown)"; echo "user: ${USER:-unknown}"; } > "$LOCK/owner"
+      echo "host: $(hostname 2>/dev/null || echo unknown)"; } > "$LOCK/owner"
     echo "$id"
     ;;
   unlock)
@@ -92,8 +94,13 @@ case "$cmd" in
     for p in "$PLANS"/*.plan.md; do
       [ -e "$p" ] || continue
       st="$("$PS" check "$p" 2>/dev/null || true)"
+      if [ "$st" = "STALE" ] && [ "$("$PS" get "$p" status 2>/dev/null || true)" = "executing" ]; then
+        n=$((n + 1)); refused=$((refused + 1))
+        echo "$(plan_id "$p"): executing but STALE — delete the extra progress line or fix the plan, then re-approve"
+        continue
+      fi
       [ "$st" = "EXECUTING" ] || continue
-      n=$((n + 1)); id="$("$PS" get "$p" ticket)"; id="${id:-$(basename "$p" .plan.md)}"
+      n=$((n + 1)); id="$(plan_id "$p")"
       rc=0; "$PS" reset-executing "$p" >/dev/null 2>&1 || rc=$?
       case "$rc" in
         0)  echo "reset $id: executing -> approved" ;;
@@ -105,12 +112,14 @@ case "$cmd" in
     [ "$refused" -eq 0 ] || exit 11
     ;;
   list)
+    dash() { if [ -n "$1" ]; then printf '%s' "$1"; else printf -- '-'; fi; }
     { printf 'PLAN\tSTATE\tBRANCH\tPR\n'
       for p in "$PLANS"/*.plan.md; do
-      [ -e "$p" ] || continue
+        [ -e "$p" ] || continue
         st="$("$PS" check "$p" 2>/dev/null || true)"
-        id="$("$PS" get "$p" ticket 2>/dev/null || true)"; id="${id:-$(basename "$p" .plan.md)}"
-        printf '%s\t%s\t%s\t%s\n' "$id" "$st" "$("$PS" get "$p" branch 2>/dev/null || true)" "$("$PS" get "$p" pr 2>/dev/null || true)"
+        if [ "$st" = "STALE" ] && [ "$("$PS" get "$p" status 2>/dev/null || true)" = "executing" ]; then st="STALE (executing)"; fi
+        printf '%s\t%s\t%s\t%s\n' "$(plan_id "$p")" "$st" \
+          "$(dash "$("$PS" get "$p" branch 2>/dev/null || true)")" "$(dash "$("$PS" get "$p" pr 2>/dev/null || true)")"
       done; } | { command -v column >/dev/null && column -t -s "$(printf '\t')" || cat; }
     ;;
   start-branch)
@@ -125,8 +134,12 @@ case "$cmd" in
     if [ -n "$recorded" ]; then
       # Resume: an earlier run of this plan created the branch, then crashed.
       check_branch_name "recorded branch" "$recorded"
+      # The plan file is editable, so a recorded branch is never trusted blindly: it must be
+      # this ticket's own feature branch, and never the target branch.
+      case "$recorded" in "feature/$key-"*) ;; *) die 2 "refusing: recorded branch '$recorded' is not a feature/$key-* branch" ;; esac
+      [ "$recorded" != "$TARGET_BRANCH" ] || die 2 "refusing: recorded branch '$recorded' is the target branch"
       git show-ref --verify --quiet "refs/heads/$recorded" \
-        || die 14 "$plan recorded branch '$recorded', but it no longer exists — clear the plan's branch: field to start fresh"
+        || die 14 "$plan recorded branch '$recorded', but it no longer exists — re-stamp and re-approve the plan to start fresh"
       if [ -n "$dirty" ] && [ "$current" != "$recorded" ]; then
         die 12 "uncommitted changes on '$current' — commit or stash them before resuming '$recorded'"
       fi
@@ -136,6 +149,13 @@ case "$cmd" in
       exit 0
     fi
 
+    # A plan with no branch but a non-empty log ran on a branch that is gone or was cleared.
+    # Starting a fresh branch would let the old log claim work that isn't on it.
+    logged="$(awk '
+      f==0 && /^[ \t]*<!--[ \t]*asdlc:progress[ \t]*-->[ \t\r]*$/ {f=1; next}
+      f==1 && $0 !~ /^[ \t\r]*$/ && $0 !~ /^## Progress[ \t\r]*$/ {n++}
+      END {print n+0}' "$plan")"
+    [ "$logged" -eq 0 ] || die 15 "$plan logged progress on a branch that is gone or was cleared — re-stamp and re-approve it"
     [ -z "$dirty" ] || die 12 "uncommitted changes on '${current:-detached HEAD}' — commit or stash them first"
     check_branch_name "TARGET_BRANCH" "$TARGET_BRANCH"
     branch="feature/$key-$(slugify "$summary")"
@@ -145,8 +165,13 @@ case "$cmd" in
     fi
     git checkout --quiet "$TARGET_BRANCH" || die 1 "could not check out $TARGET_BRANCH"
     git pull --ff-only --quiet || die 1 "could not fast-forward $TARGET_BRANCH from its upstream"
-    git checkout --quiet -b "$branch"
+    # Record first: a crash between the two steps leaves a recorded-but-missing branch (exit 14,
+    # re-stamp), never an unrecorded one that blocks forever (exit 13).
     "$PS" set "$plan" branch "$branch" >/dev/null
+    if ! git checkout --quiet -b "$branch"; then
+      "$PS" set "$plan" branch "" >/dev/null || true
+      die 1 "could not create branch '$branch'"
+    fi
     echo "created $branch from $TARGET_BRANCH" >&2
     echo "$branch"
     ;;

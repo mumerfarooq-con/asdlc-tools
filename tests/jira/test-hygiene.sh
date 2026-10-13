@@ -71,4 +71,16 @@ for cmdfile in "$P"/commands/*.md; do
   done
 done
 
+t "the progress contract is byte-identical in the three agents, and the docs quote its grammar"
+contract() { sed -n '/<!-- progress-contract:start -->/,/<!-- progress-contract:end -->/p' "$1"; }
+ref="$(contract "$P/agents/prd-executor.md")"
+assert_contains "$ref" "TEST PASS" "executor contract block present"
+for a in prd-reviewer prd-tester; do
+  assert_eq "$(contract "$P/agents/$a.md")" "$ref" "$a progress contract differs from prd-executor"
+done
+assert_contains "$(cat "$P/commands/implement-prd.md")" "TEST PASS" "implement-prd quotes TEST PASS"
+fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/jira-run.md")"
+assert_not_contains "$fm" "run-state.sh list" "jira-run pre-approves run-state list"
+assert_not_contains "$fm" "run-state.sh status" "jira-run pre-approves run-state status"
+
 finish

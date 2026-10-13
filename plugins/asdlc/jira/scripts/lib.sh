@@ -6,6 +6,8 @@
 
 ASDLC_JIRA_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASDLC_JIRA_HOME="$(dirname "$ASDLC_JIRA_SCRIPTS")"
+# The plugin's shared scripts (plan-state.sh): absolute, so no caller keeps a ../ path in use.
+ASDLC_SHARED_SCRIPTS="$(cd "$ASDLC_JIRA_HOME/../scripts" && pwd)"
 
 # Keys a project's .asdlc/jira.conf may set. The file is parsed, never sourced,
 # and anything outside this list is ignored with a warning, so a committed

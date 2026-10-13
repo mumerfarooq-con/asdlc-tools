@@ -37,6 +37,9 @@ run "$S/jira-transition.sh" PROJ-1 :in-progress
 assert_eq "$CODE" "0" "exit"; assert_eq "$OUT" 'PROJ-1 is already in "In Progress"'
 assert_eq "$(posts)" "[]" "no POST"
 assert_eq "$(requests | jq -r '[.[] | select(.path | endswith("/transitions"))] | length')" "0" "transitions not even listed"
+run "$S/jira-transition.sh" PROJ-1 "in PROGRESS"
+assert_eq "$CODE" "0" "case-insensitive exit"; assert_contains "$OUT" "already in"
+assert_eq "$(posts)" "[]" "case-insensitive: no POST"
 run "$S/jira-transition.sh" PROJ-1 "QA"
 assert_eq "$(posts | jq -r '.[0].body.transition.id')" "31" "a different target still transitions"
 
