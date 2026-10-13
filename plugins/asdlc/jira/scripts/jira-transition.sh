@@ -18,6 +18,15 @@ case "$TARGET" in
 esac
 path="/rest/api/3/issue/$KEY/transitions"
 
+# Already there (e.g. a re-run after a crash): nothing to do. Workflows rarely allow a
+# transition to the current status, so asking for one would fail the run.
+current=$(asdlc_get_json jira "/rest/api/3/issue/$KEY" --data-urlencode "fields=status" | jq -r '.fields.status.name // empty')
+lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+if [ -n "$current" ] && [ "$(lc "$current")" = "$(lc "$TARGET")" ]; then
+  echo "$KEY is already in \"$current\""
+  exit 0
+fi
+
 transitions=$(asdlc_get_json jira "$path")
 tid=$(jq -r --arg s "$TARGET" '.transitions[] | select((.to.name==$s) or (.name==$s)) | .id' <<<"$transitions" | head -n1)
 

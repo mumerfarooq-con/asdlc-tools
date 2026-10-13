@@ -34,5 +34,6 @@ Write a single plan file to `./plans/<prd-slug>.plan.md` with:
 ## Rules
 - Tasks must be small enough that one executor pass can complete each (roughly ≤ ~300 LOC of change per task).
 - Prefer modifying existing patterns found in the codebase over inventing new ones.
+- Never write an `<!-- asdlc:progress -->` line in a plan: `stamp` adds it, and refuses a plan that already has one.
 - Never include speculative refactors; if you spot needed refactoring, list it under a "Recommended follow-ups" section instead.
 - Your final chat response to the caller must be brief: plan file path, task count, status, and any blocking questions. Do not restate the whole plan.

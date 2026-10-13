@@ -105,8 +105,10 @@ t "Jira POST: -X POST and no -G, still ending in -- URL"
 http_sandbox
 FAKECURL_BODY='{"transitions":[{"id":"21","name":"Start work","to":{"name":"In Progress"}}]}' \
   run "$S/jira-transition.sh" PROJ-1 "In Progress"
-assert_eq "$CODE" "0" "exit"; assert_eq "$(calls)" "2" "curl calls"
-g="$(argv 1)"; p="$(argv 2)"
+assert_eq "$CODE" "0" "exit"; assert_eq "$(calls)" "3" "curl calls (status, transitions, POST)"
+st="$(argv 1)"; g="$(argv 2)"; p="$(argv 3)"
+assert_eq "$(jq -r '.[-1]' <<<"$st")" "https://example.atlassian.net/rest/api/3/issue/PROJ-1" "status GET URL"
+assert_arg "fields=status" "$st"; assert_arg -G "$st"
 assert_arg -G "$g"; assert_no_arg -X "$g"
 assert_eq "$(after -X "$p")" "POST" "-X"; assert_no_arg -G "$p"
 assert_eq "$(after --user "$p")" "me@example.com:s3cr3t-value" "--user"
