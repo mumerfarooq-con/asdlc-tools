@@ -23,6 +23,6 @@
 
 5. **Open a GitHub PR.** Reviewers nitpick inline and/or run `/asdlc:review-pr` on the diff.
 
-6. **On merge**, a maintainer tags the release (`claude plugin tag --push .` from the repo root); teammates run `/plugin marketplace update asdlc-tools` then `/reload-plugins`.
+6. **On merge**, a maintainer tags the release from the repo root with `claude plugin tag --push -m "asdlc %s" plugins/asdlc` (the path must be the plugin directory, not `.`), then publishes a GitHub Release for the tag; teammates run `/plugin marketplace update asdlc-tools` then `/reload-plugins`.
 
 6. **Reminders:** kebab-case names; no `../` paths; use `${CLAUDE_PLUGIN_ROOT}` for scripts and support files. This is a public repo — never commit ticket keys, internal URLs, real seed checklists, or anything mined from company project-management data.
