@@ -18,6 +18,7 @@ The `asdlc` plugin ships these entrypoints (invocation names come from the comma
 - `/asdlc:review-pr` — PR Review: a single reviewer by default, or a 3-panelist council with `--council`.
 - `/asdlc:pdqc` — Pre-Delivery Quality Check: a codebase-scoped quality gate that produces findings and delegates fixes (never edits code). Stack profiles shipped: Django, FastAPI, Node/Express, React — profiles are swappable detection heuristics, and new-stack PRs only need to mirror the section headings of an existing profile.
 - `/asdlc:jira-run` — Jira leg: executes plans you've approved (implement → Bitbucket PR → review), then plans your new tickets and stops for approval. Plain REST calls from shell scripts; no Jira or Bitbucket MCP. Set a repo up once with `/asdlc:jira-setup`. See [the Jira leg README](plugins/asdlc/jira/README.md).
+- `/asdlc:plan` — approve, re-plan or validate a plan file (`approve|replan|validate <ID>`). Human-only: the model never runs it on its own. Approval is the only way a plan becomes runnable.
 
 All fifteen subagents ship inside the one plugin, so cross-workflow references resolve without any extra install.
 

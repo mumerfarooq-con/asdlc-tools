@@ -165,12 +165,12 @@ git_sandbox; git branch -q --unset-upstream; plan PROJ-13
 run "$RS" start-branch plans/PROJ-13.plan.md "x"
 [ "$CODE" -ne 0 ] && ok || nok "expected a failure"; assert_contains "$ERR" "could not fast-forward"
 
-t "reset-executing and list: an executing plan that checks STALE is reported and refused"
+t "reset-executing and list: an executing plan that checks EDITED is reported and refused"
 git_sandbox; plan PROJ-14; "$PS" set plans/PROJ-14.plan.md status executing >/dev/null
 printf '<!-- asdlc:progress -->\n' >> plans/PROJ-14.plan.md      # a second progress line
 run "$RS" reset-executing; assert_eq "$CODE" "11" "exit"
-assert_contains "$OUT" "PROJ-14: executing but STALE — delete the extra progress line"
-run "$RS" list; assert_contains "$OUT" "STALE (executing)"
+assert_contains "$OUT" "PROJ-14: executing but EDITED — delete the extra progress line"
+run "$RS" list; assert_contains "$OUT" "EDITED (executing)"
 
 t "list: a plan with no branch and no pr keeps four aligned columns"
 git_sandbox; plan PROJ-15; plan PROJ-16; "$PS" set plans/PROJ-16.plan.md branch feature/PROJ-16-x >/dev/null

@@ -50,9 +50,9 @@ assert_eq "$("$PS" get plans/PROJ-1.plan.md branch)" "feature/PROJ-1-x"
 assert_eq "$("$PS" get plans/PROJ-1.plan.md pr)" "https://example.org/pr/1"
 run "$PS" check plans/PROJ-1.plan.md; assert_eq "$OUT" "RUNNABLE"
 
-t "editing the body after approval -> STALE (11)"
+t "editing the body after approval -> EDITED (11)"
 edit_approved plans/PROJ-1.plan.md "2. sneak in"
-run "$PS" check plans/PROJ-1.plan.md; assert_eq "$OUT/$CODE" "STALE/11"
+run "$PS" check plans/PROJ-1.plan.md; assert_eq "$OUT/$CODE" "EDITED/11"
 assert_contains "$ERR" "plan body changed"
 
 t "re-stamp resets to pending over the edited body"
@@ -100,8 +100,8 @@ for s in pending executing done failed skip; do
 done
 mk T; approve "$P"; edit_approved "$P" "3. sneak in"; cp "$P" "$SB/orig"
 run "$PS" set "$P" status executing
-assert_eq "$CODE" "2" "executing from STALE"
-assert_same "$P" "$SB/orig" "plan after refused executing from STALE"
+assert_eq "$CODE" "2" "executing from EDITED"
+assert_same "$P" "$SB/orig" "plan after refused executing from EDITED"
 
 t "executing from RUNNABLE is allowed"
 mk T; approve "$P"
@@ -237,22 +237,22 @@ run "$PS" check "$P"; assert_eq "$OUT" "PENDING" "still pending"
 
 # ---- SF-1: duplicate header fields -------------------------------------------------------
 
-t "a second status: line in the header -> STALE (11), not RUNNABLE"
+t "a second status: line in the header -> EDITED (11), not RUNNABLE"
 mk D; P=plans/D.plan.md
 # the forgery: an approved line above the real (pending) one; the first match used to win
 awk '/^status:/ && !d {print "status: approved"; d=1} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
 run "$PS" check "$P"
-assert_eq "$OUT/$CODE" "STALE/11"
+assert_eq "$OUT/$CODE" "EDITED/11"
 assert_contains "$ERR" "duplicate header field" "message"
 assert_contains "$ERR" "re-stamp and re-approve" "message"
 run "$PS" set "$P" status executing
 assert_eq "$CODE" "2" "set executing on a tampered header"
 
-t "a second plan_hash: line in the header -> STALE (11)"
+t "a second plan_hash: line in the header -> EDITED (11)"
 mk D; approve "$P"
 awk '/^plan_hash:/ && !d {print "plan_hash: sha256:0"; d=1} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
 run "$PS" check "$P"
-assert_eq "$OUT/$CODE" "STALE/11"
+assert_eq "$OUT/$CODE" "EDITED/11"
 assert_contains "$ERR" "duplicate header field" "message"
 
 t "status: and plan_hash: lines in the BODY are not header duplicates"
@@ -335,11 +335,11 @@ assert_contains "$(cat "$P")" "- Task 1: DONE — files a.py" "progress kept"
 
 t "a task edited above the progress line still invalidates the approval"
 mk G; approve "$P"; edit_approved "$P" "### Task 9: something new"
-run "$PS" check "$P"; assert_eq "$OUT/$CODE" "STALE/11"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "EDITED/11"
 
-t "a second progress line is tampering: check says STALE, stamp refuses"
+t "a second progress line is tampering: check says EDITED, stamp refuses"
 mk G; approve "$P"; edit_approved "$P" "$PROGRESS"
-run "$PS" check "$P"; assert_eq "$OUT/$CODE" "STALE/11"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "EDITED/11"
 assert_contains "$ERR" "more than one" "message"
 cp "$P" "$SB/orig"
 run "$PS" stamp "$P"
@@ -393,33 +393,254 @@ awk '/^2\. |^1\. do it/ && !d {print; print "```"; print "'"$PROGRESS"'"; print 
 printf '3. sneak in below the fake line\n' > "$SB/add"
 awk -v add="$(cat "$SB/add")" '{print} /^```$/ {c++; if (c==2) print add}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
 run "$PS" check "$P"
-assert_eq "$OUT/$CODE" "STALE/11" "state"
+assert_eq "$OUT/$CODE" "EDITED/11" "state"
 run "$PS" set "$P" status executing; assert_eq "$CODE" "2" "executing refused"
 
-t "SF-1: a legacy approved plan (no line, plain body hash) is RUNNABLE; with the line and a new task it is STALE"
+t "SF-1: a legacy approved plan (no line, plain body hash) is RUNNABLE; with the line and a new task it is EDITED"
 { echo "<!-- asdlc"; echo "ticket: PROJ-8"; echo "status: approved"
   echo "plan_hash: sha256:$(bodyhash)"; echo "branch:"; echo "pr:"
   echo "updated: 2026-01-01T00:00:00Z"; echo "-->"; body; } > plans/L.plan.md
 run "$PS" check plans/L.plan.md; assert_eq "$OUT/$CODE" "RUNNABLE/0" "legacy"
 { echo "3. appended task"; echo "$PROGRESS"; echo "## Progress"; } >> plans/L.plan.md
-run "$PS" check plans/L.plan.md; assert_eq "$OUT/$CODE" "STALE/11" "legacy plan that gained a line"
+run "$PS" check plans/L.plan.md; assert_eq "$OUT/$CODE" "EDITED/11" "legacy plan that gained a line"
 sed 's/^3\. appended task$//' plans/L.plan.md > plans/L2.plan.md
-run "$PS" check plans/L2.plan.md; assert_eq "$OUT" "STALE" "even without a new task the v2 hash differs"
+run "$PS" check plans/L2.plan.md; assert_eq "$OUT" "EDITED" "even without a new task the v2 hash differs"
 
-t "N-1: executing + duplicated progress line (STALE): set failed works, executing does not"
+t "N-1: executing + duplicated progress line (EDITED): set failed works, executing does not"
 mk G; approve "$P"; "$PS" set "$P" status executing >/dev/null
 edit_approved "$P" "$PROGRESS"
-run "$PS" check "$P"; assert_eq "$OUT/$CODE" "STALE/11"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "EDITED/11"
 assert_contains "$ERR" "delete the extra" "message"
 assert_not_contains "$ERR" "re-stamp" "message no longer says re-stamp"
-run "$PS" set "$P" status failed; assert_eq "$CODE" "0" "failed from executing+STALE"
+run "$PS" set "$P" status failed; assert_eq "$CODE" "0" "failed from executing+EDITED"
 mk G; approve "$P"; edit_approved "$P" "$PROGRESS"
-run "$PS" set "$P" status failed; assert_eq "$CODE" "2" "failed from approved+STALE still refused"
+run "$PS" set "$P" status failed; assert_eq "$CODE" "2" "failed from approved+EDITED still refused"
 
 t "stamp refuses a plan whose approved part is empty"
 printf '<!-- asdlc\nticket: PROJ-4\nstatus: approved\n-->\n%s\n%s\n- Task 1: DONE\n' "$PROGRESS" "## Progress" > plans/E.plan.md; cp plans/E.plan.md "$SB/orig"
 run "$PS" stamp plans/E.plan.md
 assert_eq "$CODE" "3" "exit"; assert_contains "$ERR" "empty plan body"
 assert_same plans/E.plan.md "$SB/orig" "plan after refused stamp"
+
+# ---- M2: new statuses, ID resolution, validate, approve, replan, progress ------------------
+
+t "new statuses map to their word and exit code, and set allows them from any state"
+mk N; P=plans/N.plan.md
+for pair in stale/STALE/17 needs-info/NEEDS_INFO/18 blocked/BLOCKED/19; do
+  human_status "$P" "${pair%%/*}"
+  run "$PS" check "$P"; assert_eq "$OUT/$CODE" "${pair#*/}" "status ${pair%%/*}"
+done
+for v in stale needs-info blocked; do
+  for s in pending approved executing done failed skip; do
+    mk N; human_status "$P" "$s"
+    run "$PS" set "$P" status "$v"
+    assert_eq "$CODE" "0" "$v from $s"
+    assert_status "$P" "$v" "status $v from $s"
+  done
+done
+
+t "a bare ID and a path give the same result; a bad bare ID is refused"
+mk PROJ-5; P=plans/PROJ-5.plan.md
+for c in check get validate progress; do
+  case "$c" in get) a="status" ;; *) a="" ;; esac
+  run "$PS" $c PROJ-5 $a; o1="$OUT/$CODE/$ERR"
+  run "$PS" $c "$P" $a;   o2="$OUT/$CODE/$ERR"
+  assert_eq "$o1" "$o2" "$c by id vs path"
+done
+run "$PS" check 'PROJ 5'; assert_eq "$CODE" "2" "bad bare id"
+run "$PS" check '-x';     assert_eq "$CODE" "2" "bare id with a leading dash"
+run "$PS" check nope.md;  assert_eq "$OUT/$CODE" "MISSING/16" "a .md argument is a path"
+
+# A complete, valid plan body. vbody <open-questions block>; vplan <ID> [block] writes the file.
+vbody() {
+  cat <<EOF
+# PROJ-7: widget
+
+## Goal
+Let users export widgets.
+
+## Context used
+- ticket description
+
+## What else uses this
+| # | Where | Verdict | Why |
+|---|-------|---------|-----|
+| 1 | api/export.py:10 | needs change | reads the flag |
+
+## Must still work
+- An admin can still list widgets.
+
+## Changes
+### Task 1: add export
+Goal: do it
+Files: api/export.py
+
+## Tests
+- test_export covers the flag
+
+## Risk
+- low
+
+## Open questions
+$1
+
+## Critic notes
+| # | Severity | Finding | Evidence | Planner response |
+|---|----------|---------|----------|------------------|
+| 1 | note | nothing missing | PROJ-7 | addressed in Changes |
+EOF
+}
+vplan() { vbody "${2:-None}" > "plans/$1.plan.md"; }
+
+t "validate: a complete plan is VALID (exit 0); the unsure warning is not a failure"
+vplan V; run "$PS" validate V; assert_eq "$OUT/$CODE" "VALID/0" "valid"; assert_eq "$ERR" "" "no stderr"
+vbody None | sed 's/needs change/unsure/' > plans/V.plan.md
+run "$PS" validate V; assert_eq "$OUT/$CODE" "VALID/0" "valid with unsure"
+assert_contains "$ERR" 'warn: 1 row(s) in "What else uses this" marked unsure' "warning"
+
+t "validate: a stamped plan is checked above the progress line only"
+vplan V; "$PS" stamp plans/V.plan.md >/dev/null
+printf '%s\n' '## Goal' '' >> plans/V.plan.md     # junk below the line must not matter
+run "$PS" validate V; assert_eq "$OUT/$CODE" "VALID/0" "stamped, valid"
+
+t "validate: each rule fails INVALID (20) and names its section"
+for sec in "Goal" "Context used" "What else uses this" "Must still work" "Changes" "Tests" "Risk" "Open questions" "Critic notes"; do
+  vbody None | awk -v h="## $sec" '$0==h {skip=1; next} /^## / {skip=0} !skip {print}' > plans/X.plan.md
+  run "$PS" validate X
+  assert_eq "$OUT/$CODE" "INVALID/20" "missing $sec"
+  assert_contains "$ERR" "$sec: missing section" "missing $sec"
+done
+vbody None | sed 's/^## Goal$/## GOAL/' > plans/X.plan.md
+run "$PS" validate X; assert_eq "$OUT" "VALID" "headings are case-insensitive"
+vbody None | sed 's/^Let users export widgets\.$/<describe the goal>/' > plans/X.plan.md
+run "$PS" validate X; assert_contains "$ERR" "Goal: section is empty" "placeholder-only Goal"
+vbody None | sed '/^- An admin can still/d' > plans/X.plan.md
+run "$PS" validate X; assert_contains "$ERR" "Must still work: section is empty" "empty Must still work"
+vbody None | sed '/^### Task 1/d;/^Goal: do it/d;/^Files: api/d' > plans/X.plan.md
+run "$PS" validate X; assert_contains "$ERR" "Changes: section is empty" "empty Changes"
+vbody None | sed '/^- test_export/d' > plans/X.plan.md
+run "$PS" validate X; assert_contains "$ERR" "Tests: section is empty" "empty Tests"
+vbody None | sed 's/^### Task 1: add export/Do the export./' > plans/X.plan.md
+run "$PS" validate X; assert_eq "$OUT/$CODE" "INVALID/20" "no Task heading"
+assert_contains "$ERR" 'Changes: no "### Task <n>" heading' "no Task heading"
+vbody None | sed '/^| 1 | api\/export.py/d' > plans/X.plan.md
+run "$PS" validate X; assert_contains "$ERR" "What else uses this: no table rows" "no usage rows"
+vbody None | sed 's/^| 1 | api\/export.py.*$/No other uses found./' | sed '/^|---/d;/^| # | Where/d' > plans/X.plan.md
+run "$PS" validate X; assert_contains "$ERR" "What else uses this: says" "No other uses found without impact.md"
+mkdir -p plans/X; echo "# Impact scan: X" > plans/X/impact.md
+run "$PS" validate X; assert_eq "$OUT/$CODE" "VALID/0" "No other uses found with impact.md"
+rm -rf plans/X
+
+t "validate: open questions (unchecked, checked without an answer, answered, None)"
+vplan X '- [ ] Which format?'; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "unchecked"; assert_contains "$ERR" "Open questions: unanswered: Which format?" "unchecked"
+vplan X '- [x] Which format?'; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "checked, no answer"; assert_contains "$ERR" "Open questions: checked but no" "checked, no answer"
+assert_contains "$ERR" "Which format?" "names the question"
+vplan X '- [x] Which format? -> Answer: CSV'; run "$PS" validate X; assert_eq "$OUT/$CODE" "VALID/0" "answered"
+
+t "validate: critic blockers need a Planner response, and a disagree needs human accepted:"
+crit() {  # <planner response>
+  vbody None | sed "s/^| 1 | note | nothing missing | PROJ-7 | addressed in Changes |/| 1 | blocker | breaks export | api\/export.py:10 | $1 |/" > plans/X.plan.md
+}
+crit ''; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "blocker, empty response"; assert_contains "$ERR" "Critic notes: blocker row 1 has no Planner response" "empty"
+crit 'disagree: not an issue'; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "blocker, disagree"; assert_contains "$ERR" "Critic notes: blocker row 1 is disagreed with" "disagree"
+crit 'disagree: not an issue. human accepted: owner agrees'; run "$PS" validate X
+assert_eq "$OUT/$CODE" "VALID/0" "blocker, human accepted"
+crit 'addressed in Changes'; run "$PS" validate X; assert_eq "$OUT/$CODE" "VALID/0" "blocker, addressed"
+
+# ---- approve --------------------------------------------------------------------------------
+
+t "approve: answering the open questions, then approving, recomputes the hash and makes the plan RUNNABLE"
+vplan A '- [ ] Which format?'; "$PS" stamp plans/A.plan.md >/dev/null; P=plans/A.plan.md
+old="$("$PS" get "$P" plan_hash)"
+cp "$P" "$SB/orig"; run "$PS" approve A
+assert_eq "$CODE" "20" "refused while a question is open"; assert_contains "$OUT" "INVALID" "says INVALID"
+assert_contains "$ERR" "Open questions: unanswered" "names the question"
+assert_same "$P" "$SB/orig" "invalid plan after refused approve"
+sed 's/^- \[ \] Which format?/- [x] Which format? -> Answer: CSV/' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
+log_progress "$P" "- Task 1: EXECUTOR DONE — earlier note"
+progress_before="$(sed -n '/^<!-- asdlc:progress -->/,$p' "$P")"
+run "$PS" approve A
+assert_eq "$CODE" "0" "exit"; assert_contains "$OUT" "approved A (sha256:" "message"
+assert_status "$P" approved
+[ "$("$PS" get "$P" plan_hash)" != "$old" ] && ok || nok "hash not recomputed"
+run "$PS" check "$P"; assert_eq "$OUT/$CODE" "RUNNABLE/0" "after approve"
+assert_eq "$(sed -n '/^<!-- asdlc:progress -->/,$p' "$P")" "$progress_before" "progress section untouched"
+
+t "approve: an approved plan edited by a human is re-approved with a new hash"
+h1="$("$PS" get "$P" plan_hash)"
+edit_approved "$P" "- an extra risk the human added"
+run "$PS" check "$P"; assert_eq "$OUT" "EDITED" "edited"
+run "$PS" approve A; assert_eq "$CODE" "0" "re-approve exit"
+run "$PS" check "$P"; assert_eq "$OUT" "RUNNABLE" "runnable again"
+[ "$("$PS" get "$P" plan_hash)" != "$h1" ] && ok || nok "hash unchanged after human edit"
+
+t "approve: allowed from stale, needs-info, blocked; refused from RUNNABLE, executing, done, failed, skip"
+for s in stale needs-info blocked; do
+  vplan A; "$PS" stamp "$P" >/dev/null; human_status "$P" "$s"
+  run "$PS" approve A; assert_eq "$CODE" "0" "from $s"
+  run "$PS" check "$P"; assert_eq "$OUT" "RUNNABLE" "runnable after $s"
+done
+for s in approved executing done failed skip; do
+  vplan A; "$PS" stamp "$P" >/dev/null
+  if [ "$s" = approved ]; then "$PS" approve A >/dev/null; else human_status "$P" "$s"; fi
+  cp "$P" "$SB/orig"; run "$PS" approve A
+  assert_eq "$CODE" "2" "approve from $s"; assert_same "$P" "$SB/orig" "plan after refused approve from $s"
+done
+
+t "approve: a duplicated header field or progress line is not re-approvable"
+vplan A; "$PS" stamp "$P" >/dev/null; "$PS" approve A >/dev/null
+awk '/^status:/ && !d {print "status: approved"; d=1} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
+cp "$P" "$SB/orig"; run "$PS" approve A; assert_eq "$CODE" "2" "duplicate header"; assert_same "$P" "$SB/orig" "plan"
+vplan A; "$PS" stamp "$P" >/dev/null; "$PS" approve A >/dev/null; edit_approved "$P" "$PROGRESS"
+cp "$P" "$SB/orig"; run "$PS" approve A; assert_eq "$CODE" "2" "duplicate progress line"; assert_same "$P" "$SB/orig" "plan"
+
+t "approve: no header block -> 16, nothing written"
+vplan A; cp "$P" "$SB/orig"; run "$PS" approve A
+assert_eq "$CODE" "16" "exit"; assert_same "$P" "$SB/orig" "plan"
+
+# ---- replan ---------------------------------------------------------------------------------
+
+t "replan: moves the plan to .prev (replacing an older one); refused while executing"
+vplan R; "$PS" stamp plans/R.plan.md >/dev/null; echo old > plans/R.plan.prev.md
+cp plans/R.plan.md "$SB/orig"
+run "$PS" replan R
+assert_eq "$CODE" "0" "exit"; assert_contains "$OUT" "re-plan" "message"; assert_contains "$OUT" "plans/R.plan.prev.md" "names .prev"
+if [ ! -e plans/R.plan.md ]; then ok; else nok "plan still in place"; fi
+assert_same plans/R.plan.prev.md "$SB/orig" "moved byte-identical"
+vplan R; "$PS" stamp plans/R.plan.md >/dev/null; "$PS" approve R >/dev/null; "$PS" set R status executing >/dev/null
+cp plans/R.plan.md "$SB/orig"; run "$PS" replan R
+assert_eq "$CODE" "2" "refused while executing"; assert_same plans/R.plan.md "$SB/orig" "plan after refused replan"
+run "$PS" replan plans/nope.plan.md; assert_eq "$CODE" "2" "missing plan"
+
+# ---- progress -------------------------------------------------------------------------------
+
+t "progress: latest entry per task wins, non-grammar lines are ignored, ordered by task"
+vplan G; "$PS" stamp plans/G.plan.md >/dev/null; P=plans/G.plan.md
+log_progress "$P" "- Task 10: EXECUTOR DONE — ten"
+log_progress "$P" "- Task 2: EXECUTOR DONE — two"
+log_progress "$P" "- Task 2: TEST FAIL — broke"
+log_progress "$P" "  - Task 2: TEST PASS — indented sub-bullet is not an entry"
+log_progress "$P" "- Task 2: TEST: PASS (not the grammar)"
+log_progress "$P" "- Task 1: REVIEW APPROVED — one"
+log_progress "$P" "- Task 2: TEST PASS — fixed"
+log_progress "$P" "- Task 3: SOMETHING ELSE — nope"
+log_progress "$P" "Task 4: TEST PASS — no bullet"
+run "$PS" progress G
+assert_eq "$CODE" "0" "exit"
+assert_eq "$OUT" "Task 1: REVIEW APPROVED
+Task 2: TEST PASS
+Task 10: EXECUTOR DONE" "output"
+vplan G; "$PS" stamp "$P" >/dev/null
+run "$PS" progress G; assert_eq "$OUT/$CODE" "/0" "no entries"
+vplan H; run "$PS" progress H; assert_eq "$OUT/$CODE" "/0" "no progress line"
+printf -- '- Task 1: TEST PASS — above the line\n' >> plans/H.plan.md
+run "$PS" progress H; assert_eq "$OUT/$CODE" "/0" "entries without a line are ignored"
+vplan G; "$PS" stamp "$P" >/dev/null; log_progress "$P" "- Task 1: TEST PASS — ok"
+edit_approved "$P" "- Task 7: TEST FAIL — above the line, not progress"
+run "$PS" progress G; assert_eq "$OUT" "Task 1: TEST PASS" "only below the line"
 
 finish

@@ -71,6 +71,44 @@ for cmdfile in "$P"/commands/*.md; do
   done
 done
 
+t "/asdlc:plan is human-invoked only; planning and execute commands pre-approve the new scripts"
+fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/plan.md")"
+assert_contains "$fm" "disable-model-invocation: true" "plan.md disable-model-invocation"
+for cmdname in implement-prd jira-run; do
+  fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/$cmdname.md")"
+  assert_contains "$fm" "scripts/impact-scan.sh:*" "$cmdname pre-approves impact-scan"
+  assert_contains "$fm" "plan-state.sh validate:*" "$cmdname pre-approves validate"
+  assert_contains "$fm" "plan-state.sh progress:*" "$cmdname pre-approves progress"
+done
+
+t "the plan template has every heading validate requires, no header and no progress line"
+tpl="$P/templates/plan.md"
+req="$(sed -n "s/^REQUIRED_SECTIONS='\(.*\)'\$/\1/p" "$P/scripts/plan-state.sh")"
+assert_contains "$req" "Goal" "REQUIRED_SECTIONS readable from plan-state.sh"
+for h in $(printf '%s' "$req" | tr ' ' '_' | tr '|' ' '); do
+  h="$(printf '%s' "$h" | tr '_' ' ')"
+  if grep -qixF "## $h" "$tpl"; then ok; else nok "template lacks a '## $h' heading"; fi
+done
+assert_not_contains "$(cat "$tpl")" "asdlc:progress -->" "template has no progress line"
+assert_not_contains "$(head -n1 "$tpl")" "<!-- asdlc" "template has no header block"
+t "validate on the unfilled template: INVALID, naming the sections still empty"
+sandbox; mkdir plans; cp "$tpl" plans/PROJ-1.plan.md
+run "$SHARED/plan-state.sh" validate PROJ-1
+assert_eq "$CODE" "20" "template exit"
+assert_eq "$OUT" "INVALID" "template output"
+for sec in Goal "Must still work" Changes Tests; do assert_contains "$ERR" "$sec:" "template problem names $sec"; done
+cd "$ROOT"
+
+t "plan-critic is read-only on Opus; the planner's plan-only section names all three steps"
+cfm="$(sed -n '/^---$/,/^---$/p' "$P/agents/plan-critic.md")"
+ctools="$(printf '%s\n' "$cfm" | grep '^tools:' || true)"
+assert_contains "$ctools" "Read" "plan-critic has a tools line"
+for bad in Write Edit Bash NotebookEdit; do assert_not_contains "$ctools" "$bad" "plan-critic tools include $bad"; done
+assert_contains "$cfm" "model: opus" "plan-critic model"
+pl="$(cat "$P/agents/prd-planner.md")"
+assert_contains "$pl" "Plan-only mode" "planner plan-only section"
+for step in '`terms`' '`plan`' '`revise`'; do assert_contains "$pl" "Step $step" "planner step $step"; done
+
 t "the progress contract is byte-identical in the three agents, and the docs quote its grammar"
 contract() { sed -n '/<!-- progress-contract:start -->/,/<!-- progress-contract:end -->/p' "$1"; }
 ref="$(contract "$P/agents/prd-executor.md")"
