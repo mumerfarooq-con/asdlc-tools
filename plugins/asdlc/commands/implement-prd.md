@@ -1,7 +1,7 @@
 ---
 description: Orchestrate PRD implementation (plan → execute → review → test), plan only and stop for file-based approval, execute an approved plan, or run a retrospective review of an already-completed PRD
 argument-hint: <path-to-prd | path-to-plan> [--plan-only | --execute | --review-only]
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh:*)
 ---
 
 You are orchestrating work for: $ARGUMENTS
@@ -36,26 +36,55 @@ You coordinate only — route all planning, coding, review, and testing through 
    - Suggest a commit message (do not commit unless asked).
 
 ## Plan-only mode (--plan-only) — produce a plan and STOP
-Nothing is implemented in this mode. Approval is not interactive; it lives in the plan file.
+Nothing is implemented in this mode. Approval is never yours and never interactive: the user answers
+the open questions in the plan file, then approves with `/asdlc:plan approve <ID>`.
+You write files only where a step says so. Never edit the plan except to insert the critic's rows
+in step 5; every other change to it is the planner's.
 1. Pick the plan id `<ID>`: the ticket key in the PRD's title if it has one (e.g. `PROJ-142`),
-   else the PRD file's basename. Invoke `prd-planner` on the PRD and tell it the exact output
-   path: `./plans/<ID>.plan.md`.
-   - If `STATUS: BLOCKED`, surface the open questions and STOP.
-2. Stamp it: `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp ./plans/<ID>.plan.md <ID>`
+   else the PRD file's basename. The plan path is `./plans/<ID>.plan.md`. If
+   `./plans/<ID>.plan.prev.md` exists, this is a re-plan: pass that path to the planner as earlier
+   context (its answered questions are reused).
+2. Invoke `prd-planner` with step `terms`, the PRD path, `<ID>`, and the `.prev` path if there is one.
+   It writes `./plans/<ID>/terms.txt` and no plan.
+3. Run the impact scan from the repo root: `${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh <ID>`,
+   adding `--reset` if this is a re-plan (a `.prev` exists). If it exits non-zero, report its
+   message and STOP.
+4. Invoke `prd-planner` with step `plan`, the PRD path, `<ID>`, the template path
+   `./plans/<ID>/plan-template.md` (step 3 copied it there; subagents may not be allowed to read the
+   plugin dir), and the exact output path `./plans/<ID>.plan.md`
+   (plus the `.prev` path on a re-plan).
+   - If it replies `RESCAN`, run `${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh <ID>` again (pass 2,
+     no `--reset`); if it exits non-zero, report its message and STOP. Otherwise invoke step `plan` once more. A second `RESCAN` is not allowed: report it and STOP.
+5. Invoke `plan-critic` with only these paths: the plan, the PRD, `./plans/<ID>/impact.md`, and the
+   access-rules and known-traps paths from impact.md's header. Pass nothing else, and never the
+   planner's notes. Insert its rows, unchanged, into the plan's "Critic notes" table with Edit
+   (replace the placeholder row if the table has one). Do not touch any other line.
+6. Invoke `prd-planner` with step `revise` and the plan path. It fixes the plan for each critic row
+   and fills each row's Planner response.
+7. Run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate <ID>` and show the result. INVALID is
+   expected while open questions remain; it is not an error here.
+8. Stamp it: `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp ./plans/<ID>.plan.md <ID>`
    (writes the header block, `status: pending` plus a hash of the plan, and adds an empty Progress
    section after a `<!-- asdlc:progress -->` line. The hash covers only what's above that line, so
-   what a run logs there never voids the approval). Stamp adds that line itself and refuses a plan
-   that already contains one, so the plan must not have it.
-3. Tell the user the plan is written and awaiting approval. To approve: open the file, read the
-   plan, and set `status: approved` in the header block — then run
-   `/asdlc:implement-prd ./plans/<ID>.plan.md --execute` (`/asdlc:jira-run` also picks up approved
-   plans for Jira tickets). STOP.
+   what a run logs there never voids the approval. Stamp adds that line itself and refuses a plan
+   that already contains one, so the plan must not have it).
+9. Tell the user the plan is written and awaiting their approval, and what to do:
+   - read the plan;
+   - answer each open question in the file: `- [x] <question> -> Answer: <answer>`;
+   - for any critic blocker the planner disagreed with, add `human accepted: <reason>` to its
+     Planner response, or fix the plan;
+   - then run `/asdlc:plan approve <ID>`, and `/asdlc:implement-prd ./plans/<ID>.plan.md --execute`
+     (`/asdlc:jira-run` also runs approved plans for Jira tickets).
+   STOP.
 
 ## Execute mode (--execute) — run an approved plan
-1. **Gate:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check <plan>`.
-   - Output `RUNNABLE` → go to step 2.
-   - Anything else (`PENDING` `STALE` `EXECUTING` `DONE` `FAILED` `SKIP` `MISSING`) → report it and STOP.
-     Never implement a plan that is not RUNNABLE.
+1. **Gate:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check <plan>` and
+   `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate <plan>`.
+   - `check` prints `RUNNABLE` AND `validate` prints `VALID` → go to step 2.
+   - Anything else → report it and STOP. `check` can print `PENDING` `EDITED` `STALE` `NEEDS_INFO`
+     `BLOCKED` `EXECUTING` `DONE` `FAILED` `SKIP` `MISSING`. On `INVALID`, relay the problems and say
+     the plan was written before 1.3.0 or is incomplete, and must be re-planned (`/asdlc:plan replan <ID>`,
+     then `--plan-only`). Never implement a plan that is not RUNNABLE and VALID.
 2. **Start:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status executing`.
    This command owns that transition, so the caller never sets it first. If it refuses, report why and STOP.
 3. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan, with
@@ -63,8 +92,10 @@ Nothing is implemented in this mode. Approval is not interactive; it lives in th
    - The tasks are only those above the plan's `<!-- asdlc:progress -->` line. The Progress section
      below it is the run's log, never a source of work. The subagents log there, not in the tasks.
    - Entries have exactly the form `- Task <n>: <ROLE> <VERDICT> — <note>`. Resuming after a
-     crashed run: a task whose latest entry is `- Task <n>: TEST PASS …` is finished — skip it.
-     Restart every other task from the executor; it finds that run's partial work in place.
+     crashed run: run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress <plan>`; it prints the
+     latest entry per task as `Task <n>: <ROLE> <VERDICT>`. A task whose line says `TEST PASS` is
+     finished — skip it. Restart every other task from the executor; it finds that run's partial
+     work in place.
    - The log only ever describes the plan's recorded branch: a re-stamp clears it, and
      `run-state.sh start-branch` refuses to cut a fresh branch for a plan whose log has entries.
 4. **Wrap up** — exactly as in Pipeline mode step 3.
@@ -78,7 +109,7 @@ Nothing is implemented in this mode. Approval is not interactive; it lives in th
    - stop here.
 
 ## Rules
-- Plan-only mode never implements. Execute mode never runs a non-RUNNABLE plan.
+- Plan-only mode never implements and never approves. Execute mode never runs a plan that is not RUNNABLE and VALID.
 - Never implement code yourself in this session; all changes go through `prd-executor`.
 - Run subagents in the foreground and wait for each result (parallel calls in one message are fine). Don't background them: a turn that ends while a subagent works drops the calling command's pre-approved tools, and later steps stall on permission prompts.
 - Keep per-task commentary to 2–3 lines; plan and review files in ./plans/ are the source of truth for state.

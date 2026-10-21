@@ -94,9 +94,9 @@ case "$cmd" in
     for p in "$PLANS"/*.plan.md; do
       [ -e "$p" ] || continue
       st="$("$PS" check "$p" 2>/dev/null || true)"
-      if [ "$st" = "STALE" ] && [ "$("$PS" get "$p" status 2>/dev/null || true)" = "executing" ]; then
+      if [ "$st" = "EDITED" ] && [ "$("$PS" get "$p" status 2>/dev/null || true)" = "executing" ]; then
         n=$((n + 1)); refused=$((refused + 1))
-        echo "$(plan_id "$p"): executing but STALE — delete the extra progress line or fix the plan, then re-approve"
+        echo "$(plan_id "$p"): executing but EDITED — delete the extra progress line or fix the plan, then re-approve"
         continue
       fi
       [ "$st" = "EXECUTING" ] || continue
@@ -117,7 +117,7 @@ case "$cmd" in
       for p in "$PLANS"/*.plan.md; do
         [ -e "$p" ] || continue
         st="$("$PS" check "$p" 2>/dev/null || true)"
-        if [ "$st" = "STALE" ] && [ "$("$PS" get "$p" status 2>/dev/null || true)" = "executing" ]; then st="STALE (executing)"; fi
+        if [ "$st" = "EDITED" ] && [ "$("$PS" get "$p" status 2>/dev/null || true)" = "executing" ]; then st="EDITED (executing)"; fi
         printf '%s\t%s\t%s\t%s\n' "$(plan_id "$p")" "$st" \
           "$(dash "$("$PS" get "$p" branch 2>/dev/null || true)")" "$(dash "$("$PS" get "$p" pr 2>/dev/null || true)")"
       done; } | { command -v column >/dev/null && column -t -s "$(printf '\t')" || cat; }

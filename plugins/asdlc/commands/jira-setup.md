@@ -28,7 +28,8 @@ token value: tokens stay in env vars (`JIRA_EMAIL`, `JIRA_TOKEN`, `BITBUCKET_TOK
      (e.g. `export JIRA_TOKEN=...` in `~/.zshrc`), then STOP — you can't fix that for me.
    - `warn` lines: relay them; they don't block. A missing `STATUS_NEEDS_INFO` needs a Jira admin.
 4. **Wrap up.** Suggest adding these lines to `.gitignore` (plans and PRDs hold ticket text and
-   must never be staged by a run): `plans/.jira-run.lock`, `plans/*.plan.md`, `prds/`. A `warn` from
+   must never be staged by a run): `plans/.jira-run.lock`, `plans/*.plan.md`, `plans/*/` (impact.md can quote code),
+   `plans/*.plan.prev.md` (an old plan), `prds/`. A `warn` from
    check about them means they're missing. Also suggest committing
    `.asdlc/jira.conf` plus the two docs files. Then show the final config
    (`${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh`) and say the repo is ready for `/asdlc:jira-run`.

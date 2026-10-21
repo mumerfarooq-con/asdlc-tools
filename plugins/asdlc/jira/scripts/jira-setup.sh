@@ -160,15 +160,15 @@ do_check() {
     if [ -f "$TOP/${!k}" ]; then ok "${!k} exists"; else warn "${!k} missing — run: jira-setup.sh docs"; fi
   done
 
-  # Plans and PRDs hold ticket text and the run lock is transient: none should
-  # ever be committed. Exit 1 means "not ignored"; 128 (no repo) says nothing.
+  # Plans and PRDs hold ticket text, impact.md can quote code, .prev holds an old
+  # plan, and the run lock is transient: none should ever be committed. Exit 1 means "not ignored"; 128 (no repo) says nothing.
   local p rc unignored=""
-  for p in plans/.jira-run.lock plans/x.plan.md prds/x.md; do
+  for p in plans/.jira-run.lock plans/x.plan.md plans/x/impact.md plans/x.plan.prev.md prds/x.md; do
     rc=0; git -C "$TOP" check-ignore -q "$p" 2>/dev/null || rc=$?
     [ "$rc" -eq 1 ] && unignored="$unignored $p"
   done
   if [ -n "$unignored" ]; then
-    warn "not git-ignored:$unignored — add to .gitignore: plans/.jira-run.lock, plans/*.plan.md, prds/"
+    warn "not git-ignored:$unignored — add to .gitignore: plans/.jira-run.lock, plans/*.plan.md, plans/*/, plans/*.plan.prev.md, prds/"
   fi
 }
 

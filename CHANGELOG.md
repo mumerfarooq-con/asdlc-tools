@@ -4,6 +4,30 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.3.0] - 2026-10-21
+
+### Added
+
+- **Plan format and planner protocol.** `/asdlc:implement-prd --plan-only` (and so `/asdlc:jira-run` planning) now follows a fixed flow: terms, impact scan, plan from `templates/plan.md`, critic, revise, validate, stamp. The plan has Goal, Context used, What else uses this, Must still work, Changes (executor-ready tasks), Tests, Risk, Open questions and Critic notes. The planner is given rules for hypotheses, access, and unknowns (which become open questions). The default pipeline mode keeps its old plan format.
+- `scripts/impact-scan.sh`: searches the repo and `IMPACT_EXTRA_PATHS` for the plan's terms and writes `plans/<ID>/impact.md`, with sensitive-path and sensitive-topic markers. Two passes at most. It also copies the plan template to `plans/<ID>/plan-template.md`, so the planner never reads the plugin dir.
+  - Secret files are never searched, in any root and whatever `IMPACT_EXCLUDE` says: `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, SSH keys (`id_rsa*` and the like), `.netrc`, `.npmrc`, `.pypirc`, `.git-credentials`, `.pgpass`, `*.tfvars` (a directory with such a name is skipped too). Their lines would otherwise be copied into impact.md.
+  - `plans`, `prds` and `.asdlc` are skipped only at the root being searched, so code in `src/plans/` is found. `IMPACT_EXCLUDE` entries still match at any depth.
+  - A failed search (for example an unreadable `IMPACT_EXTRA_PATHS` root) stops the scan with exit 2 and writes no impact.md, instead of reading as `(0 hits)`.
+- `plan-critic` agent (Opus, read-only): reviews a plan in a fresh context and returns findings as Critic notes rows.
+- `plan-state.sh validate | approve | replan | progress`. `validate` checks that a plan is complete (required sections, no open questions, no unanswered critic blockers). `approve` validates, re-hashes and approves. `replan` moves the plan to `.prev`. `progress` prints the latest log entry per task. Every subcommand also takes a bare plan id. New check words `NEEDS_INFO` and `BLOCKED`.
+  - `validate` fails closed on Critic notes rows: a row whose cell count differs from the header's (an unescaped `|`; write `\|`) makes the plan INVALID. Severity and the `disagree` / `human accepted:` response are compared case- and markup-insensitively (`**Blocker**`, `Blocker.`).
+- `/asdlc:plan approve|replan|validate <ID>`: human-only (`disable-model-invocation`). `plan-state.sh approve` is in no command's pre-approved tools, so approving needs your confirmation.
+- `prd-executor` stops with `EXECUTOR BLOCKED` when the approved plan can't work as written, instead of improvising.
+
+### Changed
+
+- `check` prints `EDITED` (exit 11) where it printed `STALE` for a plan whose approved part no longer matches its hash. `STALE` now means the ticket changed after approval (exit 17).
+- Execute mode and `/asdlc:jira-run` Phase A require `check` = RUNNABLE and `validate` = VALID. **Plans written before 1.3.0 don't validate and are not executed: re-plan them** (`/asdlc:plan replan <ID>`, then plan again).
+- Approval is `/asdlc:plan approve`, not hand-editing `status: approved`.
+- The suggested `.gitignore` lines gain `plans/*/` (impact.md can quote code) and `plans/*.plan.prev.md` (an old plan), and `jira-setup.sh check` warns when they are missing. Add them to existing repos.
+
+[1.3.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.3.0
+
 ## [1.2.0] - 2026-10-13
 
 ### Added

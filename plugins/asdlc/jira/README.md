@@ -32,9 +32,10 @@ export BITBUCKET_TOKEN="..."            # workspace/repo access token or user AP
 # export BITBUCKET_EMAIL="..."          # only with BB_AUTH=basic in the config
 ```
 
-Add these lines to `.gitignore`: `plans/.jira-run.lock`, `plans/*.plan.md` and `prds/`. Plans and
-PRDs hold ticket text, and a run stages only the files the executor reports, never these.
-`jira-setup.sh check` warns when any of them is not ignored.
+Add these lines to `.gitignore`: `plans/.jira-run.lock`, `plans/*.plan.md`, `plans/*/`,
+`plans/*.plan.prev.md` and `prds/`. Plans and PRDs hold ticket text, `plans/<ID>/impact.md` can
+quote code, and `.plan.prev.md` holds an old plan. A run stages only the files the executor
+reports, never these. `jira-setup.sh check` warns when any of them is not ignored.
 
 ### Where your token goes
 Your Jira token is sent only to `JIRA_BASE_URL`, so that URL is checked before every call. It must
@@ -48,12 +49,32 @@ A committed config can't grant itself a host: this variable is not a config key,
 in `.asdlc/jira.conf` only produces an "unknown key" warning. `jira-setup.sh check` prints the host
 it signed in to.
 
-## Approving a plan
-After a planning run, open `./plans/<KEY>.plan.md`. At the top is a header block:
+## Planning and approving a plan
+Planning (`/asdlc:jira-run` Phase B, or `/asdlc:implement-prd <prd> --plan-only`) runs a fixed flow:
+the planner lists the terms the change touches (`./plans/<ID>/terms.txt`), `impact-scan.sh` searches
+the repo for them (`./plans/<ID>/impact.md`, at most two passes), the planner writes the plan from
+[the plan template](../templates/plan.md), the `plan-critic` agent (fresh context, read-only) adds
+its findings to the Critic notes table, the planner answers each row, and `stamp` adds the header.
+The plan is left `pending`. Nothing runs until you approve it.
+
+After a planning run, open `./plans/<KEY>.plan.md`:
+1. Read the plan. "What else uses this" and "Must still work" are what the change must not break.
+2. Answer each open question in the file: `- [x] <question> -> Answer: <answer>`.
+3. Read the Critic notes. For a `blocker` row the planner disagreed with, add `human accepted: <reason>`
+   to its Planner response, or fix the plan.
+4. Run `/asdlc:plan validate <KEY>` any time to see what is still missing.
+5. Run `/asdlc:plan approve <KEY>`. It validates first, then runs `plan-state.sh approve`, which
+   the harness asks you to confirm. That confirmation is the approval: the script is never
+   pre-approved, and there is no more hand-editing `status: approved`.
+
+`/asdlc:plan replan <KEY>` moves a plan to `./plans/<KEY>.plan.prev.md` (refused while it is
+executing). The next planning run re-plans the ticket and reuses the answers kept in `.prev`.
+
+The header block, written by `stamp`:
 ```
 <!-- asdlc
 ticket: PROJ-142
-status: pending          <-- change to: approved
+status: pending
 plan_hash: sha256:...    <-- tool-managed, don't touch
 ...
 -->
@@ -61,19 +82,35 @@ plan_hash: sha256:...    <-- tool-managed, don't touch
 <!-- asdlc:progress -->
 ## Progress
 ```
-Read the plan, change `status: pending` to `status: approved`, save. That's the whole gate.
 - The hash covers the plan above the `<!-- asdlc:progress -->` line. A run logs each task's status,
   notes and test results in the Progress section below it, so logging never voids your approval.
-- The contract: everything you sign off is above the line (a later release's Critic notes and
-  Open-question answers included). Only the machine run log is below it, and it is never a source
-  of work. `stamp` owns the line: it adds it, and refuses a plan that already contains one.
-- Don't hand-edit the plan above that line: it breaks the hash and the next run refuses it as STALE. If you
-  really want to edit it, re-stamp it (`plan-state.sh stamp ./plans/<KEY>.plan.md` — resets it to
-  pending over your edit), then approve.
+- The contract: everything you sign off is above the line, Critic notes and Open-question answers
+  included. Only the machine run log is below it, and it is never a source of work. `stamp` owns
+  the line: it adds it, and refuses a plan that already contains one.
+- `check` words: `EDITED` means the plan above the line no longer matches its hash (someone edited
+  it after approval or stamping): run `/asdlc:plan approve <KEY>` again once you've reviewed the
+  edit. `STALE` means the ticket changed after approval (`status: stale`, set by a later release's
+  ticket check): re-plan it. `NEEDS_INFO` and `BLOCKED` are likewise set from outside. All of these
+  fail closed: the plan is skipped and reported.
 - To skip a ticket permanently, set `status: skip` (or delete the file).
+- Only plans that pass `validate` run. Plans written before 1.3.0 don't, so they need
+  `/asdlc:plan replan` and a fresh planning run.
 - Plans stamped before 1.2.0 restart from scratch after a re-stamp and your re-approval, because
   their agents logged inside the tasks, not in a Progress section.
 - Plans written by earlier in-repo versions (header `<!-- jira-run:approval`) keep working.
+
+### Impact scan
+`scripts/impact-scan.sh <ID>` (shared, in the plugin's `scripts/`) reads `./plans/<ID>/terms.txt`
+(one fixed string per line, matched as whole words) and writes `./plans/<ID>/impact.md` (and
+copies the plan template to `./plans/<ID>/plan-template.md`, so the planner never reads the plugin
+dir): for each term its hits (capped at 50 per term), marking sensitive paths (`REVIEW_COUNCIL_PATHS`) and
+`SENSITIVE_TOPICS` words. It searches the repo plus `IMPACT_EXTRA_PATHS`, skips `IMPACT_EXCLUDE`
+dirs and always `plans`, `prds` and `.asdlc`, and uses ripgrep if installed, else grep. Those three
+are skipped only at the root being searched, so `src/plans/` is searched. Secret files (`.env*`,
+key and cert files such as `*.pem` and `*.key`, SSH keys, `.netrc`, `.npmrc`, `.pypirc`, `.git-credentials`, `.pgpass`, `*.tfvars`; a directory with such a name is skipped too) are never
+searched, in any root and whatever `IMPACT_EXCLUDE` says, because hit lines are copied into
+impact.md. If a search itself fails, the scan stops with exit 2 and writes no impact.md. It allows
+two passes per plan; `--reset` starts over for a re-plan.
 
 ## Run it
 ```
@@ -133,8 +170,9 @@ plugin repo for the layout).
 - `ticket-to-prd.sh` — one ticket → `./prds/<KEY>.md`.
 - `run-state.sh` — run lock and recovery: `lock | unlock <run-id> | status | force-unlock |
   reset-executing | list | start-branch <plan> <summary>`.
-- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing`. It
+- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing | validate | approve | replan | progress`. `approve` is human-only (`/asdlc:plan`). It
   lives in the plugin's shared `scripts/`, because `/asdlc:implement-prd` uses it outside Jira too.
+- `impact-scan.sh` — the planner's repo search (see Impact scan above); also in the plugin's shared `scripts/`.
 - `bb-open-pr.sh`, `bb-pr-comment.sh` — open a PR, comment on it.
 - `review-mode.sh` — council vs solo from the PR diff (files/lines/sensitive paths).
 - `jira-transition.sh` — move a ticket by status name, or `:todo :in-progress :testing :needs-info`.
