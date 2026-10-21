@@ -4,7 +4,7 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
-## [1.3.0] - 2026-10-16
+## [1.3.0] - 2026-10-21
 
 ### Added
 
