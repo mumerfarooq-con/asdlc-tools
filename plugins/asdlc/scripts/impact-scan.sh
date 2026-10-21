@@ -3,11 +3,13 @@
 #   impact-scan.sh <ID> [--conf <file>] [--reset]     (run from the repo root)
 # Reads ./plans/<ID>/terms.txt (one term per line; blank and # lines ignored), searches the repo
 # (and IMPACT_EXTRA_PATHS, read-only) for each term as a fixed, whole word, and rewrites
-# ./plans/<ID>/impact.md. At most two passes per plan (the planner may add terms after reading
-# the first hits); --reset starts again at pass 1 for a re-plan. Works with no .asdlc/jira.conf.
+# ./plans/<ID>/impact.md. Every run also copies the plan template to
+# ./plans/<ID>/plan-template.md, so the planner reads it from inside the repo (subagents may not
+# be allowed to read the plugin dir). At most two passes per plan (the planner may add terms after
+# reading the first hits); --reset starts again at pass 1 for a re-plan. Works with no .asdlc/jira.conf.
 # Uses ripgrep when a real rg binary is on PATH, else grep; ASDLC_IMPACT_NO_RG=1 forces grep.
 # Both give the same output for the same tree. ASDLC_IMPACT_NOW overrides the timestamp (tests).
-# Exit: 0 written; 2 bad input or refused (bad term, no terms, third pass).
+# Exit: 0 written; 2 bad input or refused (bad term, no terms, third pass, plugin template missing).
 set -euo pipefail
 # Byte semantics everywhere, so rg, grep, sort and awk agree on word characters and ordering.
 export LC_ALL=C
@@ -38,6 +40,9 @@ top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 dir="plans/$id"
 terms_file="$dir/terms.txt"
 out="$dir/impact.md"
+tpl_src="$HERE/templates/plan.md"
+tpl_out="$dir/plan-template.md"
+[ -f "$tpl_src" ] || { echo "impact-scan.sh: plan template $tpl_src not found (broken plugin install?)" >&2; exit 2; }
 [ -f "$terms_file" ] || { echo "impact-scan.sh: $terms_file not found (the planner writes it first)" >&2; exit 2; }
 
 # Terms: validated whole before any search runs.
@@ -120,8 +125,8 @@ while IFS= read -r tp; do
   if [[ $tp =~ ^[A-Za-z0-9_]+$ ]]; then TOPICS+=("$tp"); else asdlc_warn "SENSITIVE_TOPICS: '$tp' is not a single word, skipped"; fi
 done < <(asdlc_split_csv "$SENSITIVE_TOPICS")
 
-work="$(mktemp -d)"; otmp=""
-trap 'rm -rf "$work"; [ -z "$otmp" ] || rm -f "$otmp"' EXIT
+work="$(mktemp -d)"; otmp=""; ttmp=""
+trap 'rm -rf "$work"; [ -z "$otmp" ] || rm -f "$otmp"; [ -z "$ttmp" ] || rm -f "$ttmp"' EXIT
 
 present() { if [ -f "$1" ]; then echo present; else echo missing; fi; }
 now="${ASDLC_IMPACT_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
@@ -166,6 +171,10 @@ for term in "${TERMS[@]}"; do
 done
 shopt -u nocasematch
 
+# Template copy first, so a finished impact.md always has its template next to it.
+ttmp="$(mktemp "$dir/.template.XXXXXX")"
+cat "$tpl_src" > "$ttmp"
+mv "$ttmp" "$tpl_out"; ttmp=""
 otmp="$(mktemp "$dir/.impact.XXXXXX")"
 {
   printf '# Impact scan: %s\n' "$id"
@@ -176,4 +185,4 @@ otmp="$(mktemp "$dir/.impact.XXXXXX")"
   cat "$body"
 } > "$otmp"
 mv "$otmp" "$out"; otmp=""
-echo "impact-scan: pass $pass, $nterms term(s) -> $out"
+echo "impact-scan: pass $pass, $nterms term(s) -> $out (+ $tpl_out)"

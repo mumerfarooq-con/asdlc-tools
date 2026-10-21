@@ -100,8 +100,9 @@ plan_hash: sha256:...    <-- tool-managed, don't touch
 
 ### Impact scan
 `scripts/impact-scan.sh <ID>` (shared, in the plugin's `scripts/`) reads `./plans/<ID>/terms.txt`
-(one fixed string per line, matched as whole words) and writes `./plans/<ID>/impact.md`: for each
-term its hits (capped at 50 per term), marking sensitive paths (`REVIEW_COUNCIL_PATHS`) and
+(one fixed string per line, matched as whole words) and writes `./plans/<ID>/impact.md` (and
+copies the plan template to `./plans/<ID>/plan-template.md`, so the planner never reads the plugin
+dir): for each term its hits (capped at 50 per term), marking sensitive paths (`REVIEW_COUNCIL_PATHS`) and
 `SENSITIVE_TOPICS` words. It searches the repo plus `IMPACT_EXTRA_PATHS`, skips `IMPACT_EXCLUDE`
 dirs and always `plans`, `prds` and `.asdlc`, and uses ripgrep if installed, else grep. It allows
 two passes per plan; `--reset` starts over for a re-plan.

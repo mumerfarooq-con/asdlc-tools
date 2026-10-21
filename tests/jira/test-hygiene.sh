@@ -81,6 +81,12 @@ for cmdname in implement-prd jira-run; do
   assert_contains "$fm" "plan-state.sh progress:*" "$cmdname pre-approves progress"
 done
 
+t "implement-prd and jira-run never hand an agent a plugin-dir template path; the planner gets the in-repo copy"
+for cmdname in implement-prd jira-run; do
+  assert_not_contains "$(cat "$P/commands/$cmdname.md")" 'CLAUDE_PLUGIN_ROOT}/templates/' "$cmdname has no plugin-dir template path"
+done
+assert_contains "$(cat "$P/commands/implement-prd.md")" "plans/<ID>/plan-template.md" "implement-prd names the in-repo template copy"
+
 t "the plan template has every heading validate requires, no header and no progress line"
 tpl="$P/templates/plan.md"
 req="$(sed -n "s/^REQUIRED_SECTIONS='\(.*\)'\$/\1/p" "$P/scripts/plan-state.sh")"

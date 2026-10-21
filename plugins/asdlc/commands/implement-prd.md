@@ -50,7 +50,8 @@ in step 5; every other change to it is the planner's.
    adding `--reset` if this is a re-plan (a `.prev` exists). If it exits non-zero, report its
    message and STOP.
 4. Invoke `prd-planner` with step `plan`, the PRD path, `<ID>`, the template path
-   `${CLAUDE_PLUGIN_ROOT}/templates/plan.md`, and the exact output path `./plans/<ID>.plan.md`
+   `./plans/<ID>/plan-template.md` (step 3 copied it there; subagents may not be allowed to read the
+   plugin dir), and the exact output path `./plans/<ID>.plan.md`
    (plus the `.prev` path on a re-plan).
    - If it replies `RESCAN`, run `${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh <ID>` again (pass 2,
      no `--reset`), then invoke step `plan` once more. A second `RESCAN` is not allowed: report it and STOP.

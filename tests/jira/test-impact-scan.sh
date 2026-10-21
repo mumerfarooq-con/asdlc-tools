@@ -134,7 +134,7 @@ seq 1 201 | sed 's/^/term/' > plans/PROJ-1/terms.txt
 run "$SCAN" PROJ-1; assert_eq "$CODE" "2" "201 terms"; assert_contains "$ERR" "200" "cap msg"
 seq 1 200 | sed 's/^/term/' > plans/PROJ-1/terms.txt
 run "$SCAN" PROJ-1; assert_eq "$CODE" "0" "200 terms ok"
-rm plans/PROJ-1/impact.md
+rm plans/PROJ-1/impact.md plans/PROJ-1/plan-template.md
 printf '# only a comment\n\n' > plans/PROJ-1/terms.txt
 run "$SCAN" PROJ-1; assert_eq "$CODE" "2" "no terms"
 rm plans/PROJ-1/terms.txt
@@ -169,5 +169,28 @@ if [ -n "$RGDIR" ]; then
 else
   echo "  note: no rg binary on PATH; rg/grep comparison skipped"
 fi
+
+t "the plan template is copied into plans/<ID>/ on every run, and a stale copy is overwritten"
+TPL="$ROOT/plugins/asdlc/templates/plan.md"
+repo
+run "$SCAN" PROJ-1; assert_eq "$CODE" "0" "pass 1"
+assert_eq "$(cmp "$TPL" plans/PROJ-1/plan-template.md && echo same)" "same" "copy after pass 1"
+echo "edited" > plans/PROJ-1/plan-template.md
+run "$SCAN" PROJ-1; assert_eq "$CODE" "0" "pass 2"
+assert_eq "$(cmp "$TPL" plans/PROJ-1/plan-template.md && echo same)" "same" "edited copy overwritten after pass 2"
+echo "stale" > plans/PROJ-1/plan-template.md
+run "$SCAN" PROJ-1 --reset; assert_eq "$CODE" "0" "reset"
+assert_eq "$(cmp "$TPL" plans/PROJ-1/plan-template.md && echo same)" "same" "stale copy overwritten after --reset"
+assert_not_contains "$(cat plans/PROJ-1/impact.md)" "plan-template" "the copy is not scanned"
+assert_eq "$(ls -A plans/PROJ-1 | tr '\n' ' ')" "impact.md plan-template.md terms.txt " "no temp files left"
+
+t "plugin template missing: refused with exit 2, nothing written"
+repo
+PL="$TD/plug-$$"; SANDBOXES+=("$PL"); mkdir -p "$PL"
+cp -R "$ROOT/plugins/asdlc/scripts" "$ROOT/plugins/asdlc/jira" "$PL/"
+run "$PL/scripts/impact-scan.sh" PROJ-1
+assert_eq "$CODE" "2" "exit"
+assert_contains "$ERR" "plan template" "message"
+assert_eq "$(ls plans/PROJ-1)" "terms.txt" "neither impact.md nor the copy written"
 
 finish
