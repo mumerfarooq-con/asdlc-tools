@@ -160,14 +160,82 @@ for i in $(seq 1 55); do echo "access $i"; done > src/many.txt
 printf 'access \x00 binary\n' > src/bin.dat
 mkdir -p src/.hidden; echo 'access hidden' > src/.hidden/h.txt
 printf 'src/ignored.txt\n' > .gitignore; echo 'access ignored' > src/ignored.txt
+mkdir -p a/plans lib/prds deploy
+echo 'access nested plans' > a/plans/x.py; echo 'access nested prds' > lib/prds/y.py
+echo 'access secret' > .env; echo 'access secret' > deploy/id_rsa; echo 'access secret' > "$TD/extra2-$$/server.key"
 ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; assert_eq "$CODE" "0" "grep run"
 SANDBOXES+=("$TD/grep-$$.md"); cp plans/PROJ-1/impact.md "$TD/grep-$$.md"
+assert_contains "$(cat "$TD/grep-$$.md")" "- a/plans/x.py:1:" "nested plans found"
+assert_contains "$(cat "$TD/grep-$$.md")" "- lib/prds/y.py:1:" "nested prds found"
+assert_not_contains "$(cat "$TD/grep-$$.md")" "id_rsa" "secret skipped in identity fixture"
 assert_contains "$(cat "$TD/grep-$$.md")" "ignored.txt" "grep ignores .gitignore"
 if [ -n "$RGDIR" ]; then
   run "$SCAN" PROJ-1 --reset; assert_eq "$CODE" "0" "rg run"
   assert_eq "$(cmp "$TD/grep-$$.md" plans/PROJ-1/impact.md && echo same)" "same" "rg output == grep output"
 else
   echo "  note: no rg binary on PATH; rg/grep comparison skipped"
+fi
+
+t "secret files are never searched, in the repo or an extra root; normal files still are"
+for mode in grep rg; do
+  if [ "$mode" = rg ] && [ -z "$RGDIR" ]; then echo "  note: no rg binary on PATH; rg secret check skipped"; continue; fi
+  repo "IMPACT_EXTRA_PATHS=../extra3-$$"
+  mkdir -p deploy "$TD/extra3-$$"; SANDBOXES+=("$(cd "$TD/extra3-$$" && pwd)")
+  printf 'API_SECRET=abc\n' > .env; printf 'API_SECRET=abc\n' > .env.local
+  printf 'API_SECRET=abc\n' > server.key; printf 'API_SECRET=abc\n' > deploy/id_rsa
+  printf 'API_SECRET=abc\n' > "$TD/extra3-$$/.env"; printf 'API_SECRET=abc\n' > "$TD/extra3-$$/ca.pem"
+  printf 'API_SECRET=abc\n' > .npmrc
+  printf 'use API_SECRET here\n' > src/cfg.py; printf 'use API_SECRET too\n' > "$TD/extra3-$$/ok.py"
+  printf 'API_SECRET\n' > plans/PROJ-1/terms.txt
+  if [ "$mode" = grep ]; then ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; else run "$SCAN" PROJ-1; fi
+  assert_eq "$CODE" "0" "$mode exit"
+  M="$(cat plans/PROJ-1/impact.md)"
+  assert_contains "$M" "(2 hits)" "$mode only the two normal files"
+  assert_contains "$M" "- src/cfg.py:1: use API_SECRET here" "$mode normal source found"
+  assert_contains "$M" "- ../extra3-$$/ok.py:1:" "$mode normal extra file found"
+  assert_not_contains "$M" "API_SECRET=abc" "$mode no secret value quoted"
+  assert_not_contains "$M" ".env" "$mode .env not listed"
+  assert_not_contains "$M" "server.key" "$mode key not listed"
+  assert_not_contains "$M" "id_rsa" "$mode ssh key not listed"
+  assert_not_contains "$M" "ca.pem" "$mode extra-root pem not listed"
+done
+
+t "plans/prds/.asdlc are skipped at the root only"
+for mode in grep rg; do
+  if [ "$mode" = rg ] && [ -z "$RGDIR" ]; then echo "  note: no rg binary on PATH; rg nesting check skipped"; continue; fi
+  repo
+  mkdir -p src/plans lib/prds
+  echo 'access nested' > src/plans/x.py; echo 'access nested' > lib/prds/y.py
+  if [ "$mode" = grep ]; then ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; else run "$SCAN" PROJ-1; fi
+  M="$(cat plans/PROJ-1/impact.md)"
+  assert_contains "$M" "- src/plans/x.py:1: access nested" "$mode nested plans found"
+  assert_contains "$M" "- lib/prds/y.py:1: access nested" "$mode nested prds found"
+  assert_not_contains "$M" "- plans/" "$mode root plans skipped"
+  assert_not_contains "$M" "- prds/" "$mode root prds skipped"
+  assert_not_contains "$M" "- .asdlc/" "$mode root .asdlc skipped"
+done
+
+t "a failed search exits 2, says so, and writes no impact.md"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "  note: running as root, chmod 000 cannot force a failure; skipped"
+else
+  for mode in grep rg; do
+    if [ "$mode" = rg ] && [ -z "$RGDIR" ]; then echo "  note: no rg binary on PATH; rg failure check skipped"; continue; fi
+    repo "IMPACT_EXTRA_PATHS=../extra4-$$"
+    mkdir -p "$TD/extra4-$$"; X4="$(cd "$TD/extra4-$$" && pwd -P)"; SANDBOXES+=("$X4")
+    chmod 111 "$X4"
+    if [ "$mode" = grep ]; then ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; else run "$SCAN" PROJ-1; fi
+    chmod 755 "$X4"
+    assert_eq "$CODE" "2" "$mode exit"
+    assert_contains "$ERR" "impact-scan.sh: search failed in ../extra4-$$ for term 'access'" "$mode message"
+    assert_eq "$(ls plans/PROJ-1)" "terms.txt" "$mode no impact.md, no template copy"
+  done
+  # A root that cannot even be entered fails closed too.
+  repo "IMPACT_EXTRA_PATHS=../extra4-$$"
+  chmod 000 "$X4"; run "$SCAN" PROJ-1; chmod 755 "$X4"
+  assert_eq "$CODE" "2" "unenterable root exit"
+  assert_contains "$ERR" "search failed in ../extra4-$$" "unenterable root message"
+  assert_eq "$(ls plans/PROJ-1)" "terms.txt" "unenterable root writes nothing"
 fi
 
 t "the plan template is copied into plans/<ID>/ on every run, and a stale copy is overwritten"

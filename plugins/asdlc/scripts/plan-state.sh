@@ -177,15 +177,20 @@ write_field() {  # <field> <val>
 REQUIRED_SECTIONS='Goal|Context used|What else uses this|Must still work|Changes|Tests|Risk|Open questions|Critic notes'
 NONEMPTY_SECTIONS='Goal|Must still work|Changes|Tests'
 
+# Table rows: "\|" is cell text. In Critic notes a row whose cell count differs from the header is a
+# problem (fail closed), and severity "blocker" matches case- and markup-insensitively.
 # Checks the approved part on stdin. $1 = 1 if ./plans/<ID>/impact.md exists. One stderr line per
 # problem, each starting with the section name; "warn:" lines are not problems. Exit 1 if any.
 validate_part() {
   awk -v req="$REQUIRED_SECTIONS" -v ne="$NONEMPTY_SECTIONS" -v has_impact="$1" '
     function trim(s) { gsub(/^[ \t\r]+/, "", s); gsub(/[ \t\r]+$/, "", s); return s }
     function problem(sec, msg) { print sec ": " msg > "/dev/stderr"; bad++ }
+    # severity / response text without markup: no * _ `, trimmed, lower-case
+    function norm(s) { gsub(/[*_`]/, "", s); return tolower(trim(s)) }
     # a hint line: the whole line is <...> text, optionally bulleted
     function isph(s) { return s ~ /^[ \t]*([-*][ \t]+)?<.*>[ \t\r]*$/ }
     BEGIN {
+      PH = "\001"
       nreq = split(req, R, "|")
       for (i = 1; i <= nreq; i++) canon[tolower(R[i])] = 1
     }
@@ -203,10 +208,13 @@ validate_part() {
       if (cur == "" || cur == "?") next
       if (trim(line) == "") { tbl = 0; next }
       if (line ~ /^[ \t]*\|/) {
+        # an escaped pipe (\|) is cell text: hide it from the split; drop the closing pipe so
+        # rows with and without one count the same
+        gsub(/\\\|/, PH, line); sub(/\|[ \t\r]*$/, "", line)
         tbl++
         if (tbl == 1) {   # header row: not data; note where the critic columns are
           if (cur == "critic notes") {
-            n = split(line, H, "|"); sevc = 0; respc = 0
+            n = split(line, H, "|"); sevc = 0; respc = 0; hn = n; crow = 0
             for (i = 2; i <= n; i++) {
               h = tolower(trim(H[i]))
               if (index(h, "severity")) sevc = i
@@ -223,16 +231,26 @@ validate_part() {
         }
         if (allph) next   # an unfilled hint row is not data
         data[cur]++; content[cur]++
+        if (cur == "critic notes") {
+          crow++
+          # a split that disagrees with the header is unreadable: fail closed, not open
+          if (hn && n != hn) {
+            lbl = trim(C[2]); gsub(PH, "|", lbl)
+            problem("Critic notes", "row " (lbl != "" ? lbl : crow) ": cell count differs from the header (unescaped |? write it as \\|)")
+            next
+          }
+        }
         if (cur == "what else uses this") {
           for (i = 2; i <= n; i++) if (tolower(trim(C[i])) == "unsure") { unsure++; break }
         }
         if (cur == "critic notes") {
           sc = sevc ? sevc : 3; rc = respc ? respc : 6
-          lbl = trim(C[2])
+          lbl = trim(C[2]); gsub(PH, "|", lbl)
           resp = trim(C[rc]); if (resp ~ /^<.*>$/) resp = ""
-          if (tolower(trim(C[sc])) == "blocker") {
+          # first word "blocker": blocker, Blocker., **Blocker**, blocker (access)
+          if (norm(C[sc]) ~ /^blocker([^a-z]|$)/) {
             if (resp == "") problem("Critic notes", "blocker row " lbl " has no Planner response")
-            else if (tolower(resp) ~ /^disagree/ && index(tolower(resp), "human accepted:") == 0)
+            else if (norm(resp) ~ /^disagree/ && index(norm(resp), "human accepted:") == 0)
               problem("Critic notes", "blocker row " lbl " is disagreed with but not accepted (add \"human accepted: <reason>\")")
           }
         }

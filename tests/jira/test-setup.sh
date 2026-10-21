@@ -90,16 +90,22 @@ t "check: warns (never fails) when plans/ and prds/ are not git-ignored"
 sandbox; use_fixtures basic
 run "$SETUP" check
 assert_eq "$CODE" "0" "exit without .gitignore"
-assert_contains "$OUT" "warn  not git-ignored: plans/.jira-run.lock plans/x.plan.md prds/x.md" "warning"
-assert_contains "$OUT" "plans/*.plan.md" "suggested pattern"
-printf '%s\n' 'plans/.jira-run.lock' 'plans/*.plan.md' 'prds/' > .gitignore
+assert_contains "$OUT" "warn  not git-ignored: plans/.jira-run.lock plans/x.plan.md plans/x/impact.md plans/x.plan.prev.md prds/x.md" "warning"
+assert_contains "$OUT" "plans/*.plan.md, plans/*/, plans/*.plan.prev.md, prds/" "suggested patterns"
+printf '%s\n' 'plans/.jira-run.lock' 'plans/*.plan.md' 'plans/*/' 'plans/*.plan.prev.md' 'prds/' > .gitignore
 run "$SETUP" check
 assert_eq "$CODE" "0" "exit with .gitignore"
 assert_not_contains "$OUT" "not git-ignored" "no warning"
 printf '%s\n' 'prds/' > .gitignore
 run "$SETUP" check
-assert_contains "$OUT" "warn  not git-ignored: plans/.jira-run.lock plans/x.plan.md" "partial"
+assert_contains "$OUT" "warn  not git-ignored: plans/.jira-run.lock plans/x.plan.md plans/x/impact.md plans/x.plan.prev.md" "partial"
 assert_not_contains "$OUT" "prds/x.md" "prds ignored"
+# Only the two newer entries missing (a 1.2-era .gitignore).
+printf '%s\n' 'plans/.jira-run.lock' 'plans/*.plan.md' 'prds/' > .gitignore
+run "$SETUP" check
+assert_eq "$CODE" "0" "exit with old .gitignore"
+assert_contains "$OUT" "warn  not git-ignored: plans/x/impact.md plans/x.plan.prev.md —" "only the new two"
+assert_not_contains "$OUT" "not git-ignored: plans/.jira-run.lock" "old three ignored"
 
 t "check: token env vars required outside fixture mode"
 sandbox

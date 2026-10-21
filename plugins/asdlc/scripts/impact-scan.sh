@@ -9,7 +9,8 @@
 # reading the first hits); --reset starts again at pass 1 for a re-plan. Works with no .asdlc/jira.conf.
 # Uses ripgrep when a real rg binary is on PATH, else grep; ASDLC_IMPACT_NO_RG=1 forces grep.
 # Both give the same output for the same tree. ASDLC_IMPACT_NOW overrides the timestamp (tests).
-# Exit: 0 written; 2 bad input or refused (bad term, no terms, third pass, plugin template missing).
+# Exit: 0 written; 2 bad input or refused (bad term, no terms, third pass, plugin template missing)
+# or a failed search (nothing written).
 set -euo pipefail
 # Byte semantics everywhere, so rg, grep, sort and awk agree on word characters and ordering.
 export LC_ALL=C
@@ -20,7 +21,13 @@ ASDLC_CONF_OPTIONAL=1
 . "$HERE/jira/scripts/lib.sh"
 
 CAP=50; MAX_TERMS=200; MAX_TERM_LEN=100; MAX_LINE=200
+# Skipped only at the root being searched (a nested src/plans is real code).
 ALWAYS_EXCLUDE="plans prds .asdlc"
+# Secret files, never searched at any depth or in any root: hit lines are copied verbatim into
+# impact.md, which is not gitignored. Not part of IMPACT_EXCLUDE, because a project value replaces
+# that default. File globs, so rg uses -g '!glob' and grep --exclude (not --exclude-dir).
+SECRET_GLOBS=(".env" ".env.*" "*.pem" "*.key" "*.p12" "*.pfx" "*.jks" "*.keystore"
+  "id_rsa*" "id_dsa*" "id_ecdsa*" "id_ed25519*" ".netrc" ".npmrc" ".pypirc")
 
 reset=0
 args=()
@@ -82,14 +89,14 @@ while IFS= read -r p; do
   case "$p" in /*) cand="$p" ;; *) cand="$top/$p" ;; esac
   if [ -d "$cand" ]; then
     lab="$p"; while [ "${lab%/}" != "$lab" ] && [ "$lab" != "/" ]; do lab="${lab%/}"; done
-    ROOT_DIRS+=("$(cd "$cand" && pwd -P)"); ROOT_LABELS+=("$lab")
+    real="$(cd "$cand" 2>/dev/null && pwd -P)" || { echo "impact-scan.sh: search failed in $lab: cannot enter it" >&2; exit 2; }
+    ROOT_DIRS+=("$real"); ROOT_LABELS+=("$lab")
   else
     asdlc_warn "IMPACT_EXTRA_PATHS: '$p' is not a directory, skipped"
   fi
 done < <(asdlc_split_csv "$IMPACT_EXTRA_PATHS")
 
 EXCLUDES=()
-for x in $ALWAYS_EXCLUDE; do EXCLUDES+=("$x"); done
 while IFS= read -r x; do [ -n "$x" ] && EXCLUDES+=("$x"); done < <(asdlc_split_csv "$IMPACT_EXCLUDE")
 
 use_rg=0
@@ -100,17 +107,29 @@ fi
 
 # Hits for one term in one root, as <prefix><path>:<line>:<text>. Searches ".", so both tools
 # print "./path"; hidden files are searched and ignore files are not honoured, matching grep.
-search_root() {  # <dir> <prefix> <term>
-  local d="$1" prefix="$2" term="$3" x
+# Status 0/1 is normal; 2+ with output is partial results (an unreadable file); 2+ with no output,
+# or an unreadable root, is a failed search and must not read as "0 hits": exit 2.
+search_root() {  # <dir> <prefix> <term> <label>
+  local d="$1" prefix="$2" term="$3" label="$4" x rc=0 raw="$work/raw"
   if [ "$use_rg" -eq 1 ]; then
     local ra=(--no-config --no-messages --no-heading --with-filename --line-number -F -w --no-ignore --hidden --color never)
-    for x in "${EXCLUDES[@]}"; do ra+=(-g "!$x"); done
-    (cd "$d" && "$rgbin" "${ra[@]}" -e "$term" -- . 2>/dev/null) || true
+    for x in $ALWAYS_EXCLUDE; do ra+=(-g "!/$x"); done
+    for x in "${SECRET_GLOBS[@]}" ${EXCLUDES[@]+"${EXCLUDES[@]}"}; do ra+=(-g "!$x"); done
+    (cd "$d" 2>/dev/null || exit 3; "$rgbin" "${ra[@]}" -e "$term" -- . 2>/dev/null) > "$raw" || rc=$?
   else
+    # --exclude-dir matches base names only, so the root-only dirs are filtered from the output below.
     local ga=(-rnwFI -s)
-    for x in "${EXCLUDES[@]}"; do ga+=("--exclude-dir=$x"); done
-    (cd "$d" && grep "${ga[@]}" -e "$term" -- . 2>/dev/null) || true
-  fi | P="$prefix" awk '{ sub(/^\.\//, ""); print ENVIRON["P"] $0 }'
+    for x in "${SECRET_GLOBS[@]}"; do ga+=("--exclude=$x"); done
+    for x in ${EXCLUDES[@]+"${EXCLUDES[@]}"}; do ga+=("--exclude-dir=$x"); done
+    (cd "$d" 2>/dev/null || exit 3; grep "${ga[@]}" -e "$term" -- . 2>/dev/null) > "$raw" || rc=$?
+  fi
+  if [ "$rc" -ge 2 ] && { [ "$rc" -eq 3 ] || [ ! -s "$raw" ]; }; then
+    echo "impact-scan.sh: search failed in $label for term '$term'" >&2; exit 2
+  fi
+  P="$prefix" R="$ALWAYS_EXCLUDE" awk '
+    BEGIN { n = split(ENVIRON["R"], r, " ") }
+    { for (i = 1; i <= n; i++) if (index($0, "./" r[i] "/") == 1) next
+      sub(/^\.\//, ""); print ENVIRON["P"] $0 }' "$raw"
 }
 
 # Marker setup. nocasematch makes [[ =~ ]] case-insensitive without a fork per hit.
@@ -142,7 +161,7 @@ for term in "${TERMS[@]}"; do
   i=0
   while [ "$i" -lt "${#ROOT_DIRS[@]}" ]; do
     prefix=""; [ "$i" -gt 0 ] && prefix="${ROOT_LABELS[$i]}/"
-    search_root "${ROOT_DIRS[$i]}" "$prefix" "$term" >> "$work/hits"
+    search_root "${ROOT_DIRS[$i]}" "$prefix" "$term" "${ROOT_LABELS[$i]}" >> "$work/hits"
     i=$((i + 1))
   done
   sort -t: -k1,1 -k2,2n "$work/hits" > "$work/sorted"

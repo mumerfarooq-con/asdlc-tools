@@ -32,9 +32,10 @@ export BITBUCKET_TOKEN="..."            # workspace/repo access token or user AP
 # export BITBUCKET_EMAIL="..."          # only with BB_AUTH=basic in the config
 ```
 
-Add these lines to `.gitignore`: `plans/.jira-run.lock`, `plans/*.plan.md` and `prds/`. Plans and
-PRDs hold ticket text, and a run stages only the files the executor reports, never these.
-`jira-setup.sh check` warns when any of them is not ignored.
+Add these lines to `.gitignore`: `plans/.jira-run.lock`, `plans/*.plan.md`, `plans/*/`,
+`plans/*.plan.prev.md` and `prds/`. Plans and PRDs hold ticket text, `plans/<ID>/impact.md` can
+quote code, and `.plan.prev.md` holds an old plan. A run stages only the files the executor
+reports, never these. `jira-setup.sh check` warns when any of them is not ignored.
 
 ### Where your token goes
 Your Jira token is sent only to `JIRA_BASE_URL`, so that URL is checked before every call. It must
@@ -104,7 +105,11 @@ plan_hash: sha256:...    <-- tool-managed, don't touch
 copies the plan template to `./plans/<ID>/plan-template.md`, so the planner never reads the plugin
 dir): for each term its hits (capped at 50 per term), marking sensitive paths (`REVIEW_COUNCIL_PATHS`) and
 `SENSITIVE_TOPICS` words. It searches the repo plus `IMPACT_EXTRA_PATHS`, skips `IMPACT_EXCLUDE`
-dirs and always `plans`, `prds` and `.asdlc`, and uses ripgrep if installed, else grep. It allows
+dirs and always `plans`, `prds` and `.asdlc`, and uses ripgrep if installed, else grep. Those three
+are skipped only at the root being searched, so `src/plans/` is searched. Secret files (`.env*`,
+key and cert files such as `*.pem` and `*.key`, SSH keys, `.netrc`, `.npmrc`, `.pypirc`) are never
+searched, in any root and whatever `IMPACT_EXCLUDE` says, because hit lines are copied into
+impact.md. If a search itself fails, the scan stops with exit 2 and writes no impact.md. It allows
 two passes per plan; `--reset` starts over for a re-plan.
 
 ## Run it

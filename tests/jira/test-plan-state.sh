@@ -551,6 +551,30 @@ crit 'disagree: not an issue. human accepted: owner agrees'; run "$PS" validate 
 assert_eq "$OUT/$CODE" "VALID/0" "blocker, human accepted"
 crit 'addressed in Changes'; run "$PS" validate X; assert_eq "$OUT/$CODE" "VALID/0" "blocker, addressed"
 
+# Rows written whole (the sed helper above cannot carry a pipe). Critic notes is the last section.
+crow() {  # <full table row>
+  vbody None | grep -v '^| 1 | note | nothing missing' > plans/X.plan.md; printf '%s\n' "$1" >> plans/X.plan.md
+}
+t "validate: critic rows fail closed on an unescaped pipe, an escaped one is text, severity is normalised"
+crow "| 1 | blocker | uses grep -E 'a|b' | f.py:3 | |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "unescaped pipe"; assert_contains "$ERR" "Critic notes: row 1: cell count differs from the header" "names the cell count"
+crow "| 1 | blocker | uses grep -E 'a\\|b' | f.py:3 | addressed in Changes |"; run "$PS" validate X
+assert_eq "$OUT/$CODE/$ERR" "VALID/0/" "escaped pipe, answered"
+crow "| 1 | blocker | uses grep -E 'a\\|b' | f.py:3 | |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "escaped pipe, no response"; assert_contains "$ERR" "blocker row 1 has no Planner response" "escaped pipe, empty"
+crow "| 1 | **Blocker** | breaks export | f.py:3 | |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "**Blocker**, empty"
+crow "| 1 | Blocker. | breaks export | f.py:3 | disagree: x |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "Blocker., disagree"; assert_contains "$ERR" "is disagreed with" "Blocker. disagree message"
+crow "| 1 | blocker (access) | breaks export | f.py:3 | |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "INVALID/20" "blocker (access), empty"
+crow "| 1 | blocker | breaks export | f.py:3 | disagree: x — human accepted: y |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "VALID/0" "disagree with human accepted"
+crow "| 1 | should-fix | slow | f.py:3 | |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "VALID/0" "should-fix, empty response"
+crow "| 1 | note | fine | f.py:3 | |"; run "$PS" validate X
+assert_eq "$OUT/$CODE" "VALID/0" "note, empty response"
+
 # ---- approve --------------------------------------------------------------------------------
 
 t "approve: answering the open questions, then approving, recomputes the hash and makes the plan RUNNABLE"

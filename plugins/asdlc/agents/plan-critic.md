@@ -36,4 +36,4 @@ Reply with only these rows, then one summary line. Do not write any file.
 
 `| <n> | blocker / should-fix / note | <finding> | <evidence: file:line or ticket section> | |`
 
-Leave the last column empty; the planner fills it. Number rows from 1. With no findings, output one row with severity `note` saying so. The summary line is `Summary: <b> blocker, <s> should-fix, <n> note`.
+Write any `|` inside a cell as `\|` (an unescaped one splits the cell and the plan is then INVALID). Leave the last column empty; the planner fills it. Number rows from 1. With no findings, output one row with severity `note` saying so. The summary line is `Summary: <b> blocker, <s> should-fix, <n> note`.

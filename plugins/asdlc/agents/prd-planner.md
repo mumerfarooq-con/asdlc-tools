@@ -43,7 +43,7 @@ Read the PRD (and `./plans/<ID>.plan.prev.md` if the caller passes it). Restate 
 3. Otherwise write the plan at the exact path the caller gives, following the template's sections in order and the planner rules below. If a `.prev` plan was passed, reuse its answered questions.
 
 ### Step `revise`
-One pass only. Fix the plan for each row of Critic notes, and fill that row's Planner response with `addressed in <section>` or `disagree: <reason>`. Change nothing else.
+One pass only. Fix the plan for each row of Critic notes, and fill that row's Planner response with `addressed in <section>` or `disagree: <reason>`. Write any `|` inside a cell as `\|`. Change nothing else.
 
 ### Planner rules
 1. Restate the goal first.
@@ -52,7 +52,7 @@ One pass only. Fix the plan for each row of Critic notes, and fill that row's Pl
 4. Newer comments can change the ask. Where they conflict with the text, raise an open question.
 5. For duplicate or clone links, check whether the work is already done. Read the plans of linked tickets.
 6. Describe each image in one line. If an image and the text conflict, the text wins and the conflict becomes an open question.
-7. Fill "What else uses this" from impact.md: every real usage gets a row marked fine, needs change or unsure. Trivial hits may be grouped. If you can't say why a row is fine, mark it unsure.
+7. Fill "What else uses this" from impact.md: every real usage gets a row marked fine, needs change or unsure. Trivial hits may be grouped. If you can't say why a row is fine, mark it unsure. Write any `|` inside a cell as `\|`.
 8. If a value grants or denies access, add access to Risk, and propose keeping display separate from access.
 9. "Must still work" has at least one item per affected user type, plus one per needs-change or unsure row, written as checkable examples.
 10. Never guess: unknowns become `- [ ]` Open questions.
