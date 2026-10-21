@@ -162,12 +162,14 @@ mkdir -p src/.hidden; echo 'access hidden' > src/.hidden/h.txt
 printf 'src/ignored.txt\n' > .gitignore; echo 'access ignored' > src/ignored.txt
 mkdir -p a/plans lib/prds deploy
 echo 'access nested plans' > a/plans/x.py; echo 'access nested prds' > lib/prds/y.py
+mkdir -p .env.d; echo 'access secret' > .env.d/x.conf
 echo 'access secret' > .env; echo 'access secret' > deploy/id_rsa; echo 'access secret' > "$TD/extra2-$$/server.key"
 ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; assert_eq "$CODE" "0" "grep run"
 SANDBOXES+=("$TD/grep-$$.md"); cp plans/PROJ-1/impact.md "$TD/grep-$$.md"
 assert_contains "$(cat "$TD/grep-$$.md")" "- a/plans/x.py:1:" "nested plans found"
 assert_contains "$(cat "$TD/grep-$$.md")" "- lib/prds/y.py:1:" "nested prds found"
 assert_not_contains "$(cat "$TD/grep-$$.md")" "id_rsa" "secret skipped in identity fixture"
+assert_not_contains "$(cat "$TD/grep-$$.md")" ".env.d" "secret-named dir pruned in identity fixture"
 assert_contains "$(cat "$TD/grep-$$.md")" "ignored.txt" "grep ignores .gitignore"
 if [ -n "$RGDIR" ]; then
   run "$SCAN" PROJ-1 --reset; assert_eq "$CODE" "0" "rg run"
@@ -184,7 +186,9 @@ for mode in grep rg; do
   printf 'API_SECRET=abc\n' > .env; printf 'API_SECRET=abc\n' > .env.local
   printf 'API_SECRET=abc\n' > server.key; printf 'API_SECRET=abc\n' > deploy/id_rsa
   printf 'API_SECRET=abc\n' > "$TD/extra3-$$/.env"; printf 'API_SECRET=abc\n' > "$TD/extra3-$$/ca.pem"
-  printf 'API_SECRET=abc\n' > .npmrc
+  printf 'API_SECRET=abc\n' > .npmrc; printf 'API_SECRET=abc\n' > .envrc; printf 'API_SECRET=abc\n' > .env-prod
+  printf 'API_SECRET=abc\n' > .pgpass; printf 'API_SECRET=abc\n' > .git-credentials; printf 'API_SECRET=abc\n' > prod.tfvars
+  mkdir -p .envs/.production; printf 'API_SECRET=abc\n' > .envs/.production/.django
   printf 'use API_SECRET here\n' > src/cfg.py; printf 'use API_SECRET too\n' > "$TD/extra3-$$/ok.py"
   printf 'API_SECRET\n' > plans/PROJ-1/terms.txt
   if [ "$mode" = grep ]; then ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; else run "$SCAN" PROJ-1; fi
@@ -198,6 +202,13 @@ for mode in grep rg; do
   assert_not_contains "$M" "server.key" "$mode key not listed"
   assert_not_contains "$M" "id_rsa" "$mode ssh key not listed"
   assert_not_contains "$M" "ca.pem" "$mode extra-root pem not listed"
+  assert_not_contains "$M" ".envrc" "$mode .envrc not listed"
+  assert_not_contains "$M" ".env-prod" "$mode .env-prod not listed"
+  assert_not_contains "$M" ".envs" "$mode .envs dir not listed"
+  assert_not_contains "$M" ".django" "$mode .envs file not listed"
+  assert_not_contains "$M" ".pgpass" "$mode .pgpass not listed"
+  assert_not_contains "$M" ".git-credentials" "$mode .git-credentials not listed"
+  assert_not_contains "$M" "tfvars" "$mode tfvars not listed"
 done
 
 t "plans/prds/.asdlc are skipped at the root only"
@@ -236,6 +247,33 @@ else
   assert_eq "$CODE" "2" "unenterable root exit"
   assert_contains "$ERR" "search failed in ../extra4-$$" "unenterable root message"
   assert_eq "$(ls plans/PROJ-1)" "terms.txt" "unenterable root writes nothing"
+fi
+
+t "an unreadable dir in the repo root: same result on grep and rg (fails closed only with no other hits)"
+if [ "$(id -u)" -eq 0 ]; then
+  echo "  note: running as root, chmod 000 cannot force a failure; skipped"
+else
+  for mode in grep rg; do
+    if [ "$mode" = rg ] && [ -z "$RGDIR" ]; then echo "  note: no rg binary on PATH; rg root-dir check skipped"; continue; fi
+    repo
+    mkdir -p locked; printf 'x\n' > locked/f; SANDBOXES+=("$PWD/locked")
+    printf 'lonely_term\n' > plans/PROJ-1/terms.txt
+    chmod 000 locked
+    if [ "$mode" = grep ]; then ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; else run "$SCAN" PROJ-1; fi
+    chmod 755 locked
+    assert_eq "$CODE" "2" "$mode no other hits: exit"
+    assert_contains "$ERR" "search failed in . for term 'lonely_term' (an unreadable file or directory? add it to IMPACT_EXCLUDE" "$mode message"
+    assert_eq "$(ls plans/PROJ-1)" "terms.txt" "$mode writes nothing"
+    printf 'access\n' > plans/PROJ-1/terms.txt
+    chmod 000 locked
+    if [ "$mode" = grep ]; then ASDLC_IMPACT_NO_RG=1 run "$SCAN" PROJ-1; else run "$SCAN" PROJ-1; fi
+    chmod 755 locked
+    assert_eq "$CODE" "0" "$mode hits elsewhere: partial results, exit"
+    SANDBOXES+=("$TD/part-$mode-$$.md"); cp plans/PROJ-1/impact.md "$TD/part-$mode-$$.md"
+  done
+  if [ -n "$RGDIR" ]; then
+    assert_eq "$(cmp "$TD/part-grep-$$.md" "$TD/part-rg-$$.md" && echo same)" "same" "partial result identical on rg and grep"
+  fi
 fi
 
 t "the plan template is copied into plans/<ID>/ on every run, and a stale copy is overwritten"

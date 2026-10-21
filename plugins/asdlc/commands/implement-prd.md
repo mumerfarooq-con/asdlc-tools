@@ -54,7 +54,7 @@ in step 5; every other change to it is the planner's.
    plugin dir), and the exact output path `./plans/<ID>.plan.md`
    (plus the `.prev` path on a re-plan).
    - If it replies `RESCAN`, run `${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh <ID>` again (pass 2,
-     no `--reset`), then invoke step `plan` once more. A second `RESCAN` is not allowed: report it and STOP.
+     no `--reset`); if it exits non-zero, report its message and STOP. Otherwise invoke step `plan` once more. A second `RESCAN` is not allowed: report it and STOP.
 5. Invoke `plan-critic` with only these paths: the plan, the PRD, `./plans/<ID>/impact.md`, and the
    access-rules and known-traps paths from impact.md's header. Pass nothing else, and never the
    planner's notes. Insert its rows, unchanged, into the plan's "Critic notes" table with Edit

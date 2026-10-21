@@ -107,7 +107,7 @@ dir): for each term its hits (capped at 50 per term), marking sensitive paths (`
 `SENSITIVE_TOPICS` words. It searches the repo plus `IMPACT_EXTRA_PATHS`, skips `IMPACT_EXCLUDE`
 dirs and always `plans`, `prds` and `.asdlc`, and uses ripgrep if installed, else grep. Those three
 are skipped only at the root being searched, so `src/plans/` is searched. Secret files (`.env*`,
-key and cert files such as `*.pem` and `*.key`, SSH keys, `.netrc`, `.npmrc`, `.pypirc`) are never
+key and cert files such as `*.pem` and `*.key`, SSH keys, `.netrc`, `.npmrc`, `.pypirc`, `.git-credentials`, `.pgpass`, `*.tfvars`; a directory with such a name is skipped too) are never
 searched, in any root and whatever `IMPACT_EXCLUDE` says, because hit lines are copied into
 impact.md. If a search itself fails, the scan stops with exit 2 and writes no impact.md. It allows
 two passes per plan; `--reset` starts over for a re-plan.

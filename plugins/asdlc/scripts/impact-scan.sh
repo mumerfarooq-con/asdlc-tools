@@ -25,9 +25,11 @@ CAP=50; MAX_TERMS=200; MAX_TERM_LEN=100; MAX_LINE=200
 ALWAYS_EXCLUDE="plans prds .asdlc"
 # Secret files, never searched at any depth or in any root: hit lines are copied verbatim into
 # impact.md, which is not gitignored. Not part of IMPACT_EXCLUDE, because a project value replaces
-# that default. File globs, so rg uses -g '!glob' and grep --exclude (not --exclude-dir).
-SECRET_GLOBS=(".env" ".env.*" "*.pem" "*.key" "*.p12" "*.pfx" "*.jks" "*.keystore"
-  "id_rsa*" "id_dsa*" "id_ecdsa*" "id_ed25519*" ".netrc" ".npmrc" ".pypirc")
+# that default. rg's -g '!glob' prunes files and directories alike; grep gets both --exclude and
+# --exclude-dir so a directory named like a secret (.envs/, x.keystore/) is pruned there too.
+SECRET_GLOBS=(".env*" "*.pem" "*.key" "*.p12" "*.pfx" "*.jks" "*.keystore"
+  "id_rsa*" "id_dsa*" "id_ecdsa*" "id_ed25519*" ".netrc" ".npmrc" ".pypirc"
+  ".git-credentials" ".pgpass" "*.tfvars")
 
 reset=0
 args=()
@@ -107,10 +109,12 @@ fi
 
 # Hits for one term in one root, as <prefix><path>:<line>:<text>. Searches ".", so both tools
 # print "./path"; hidden files are searched and ignore files are not honoured, matching grep.
-# Status 0/1 is normal; 2+ with output is partial results (an unreadable file); 2+ with no output,
-# or an unreadable root, is a failed search and must not read as "0 hits": exit 2.
+# Status 0/1 is normal; 2+ with output is partial results (an unreadable file); 2+ with no output
+# left after the root-only filter, or an unreadable root, is a failed search and must not read as
+# "0 hits": exit 2. The test runs on the filtered output so grep (which walks the root plans/) and
+# rg (which does not) decide alike.
 search_root() {  # <dir> <prefix> <term> <label>
-  local d="$1" prefix="$2" term="$3" label="$4" x rc=0 raw="$work/raw"
+  local d="$1" prefix="$2" term="$3" label="$4" x rc=0 raw="$work/raw" flt="$work/flt"
   if [ "$use_rg" -eq 1 ]; then
     local ra=(--no-config --no-messages --no-heading --with-filename --line-number -F -w --no-ignore --hidden --color never)
     for x in $ALWAYS_EXCLUDE; do ra+=(-g "!/$x"); done
@@ -119,17 +123,18 @@ search_root() {  # <dir> <prefix> <term> <label>
   else
     # --exclude-dir matches base names only, so the root-only dirs are filtered from the output below.
     local ga=(-rnwFI -s)
-    for x in "${SECRET_GLOBS[@]}"; do ga+=("--exclude=$x"); done
+    for x in "${SECRET_GLOBS[@]}"; do ga+=("--exclude=$x" "--exclude-dir=$x"); done
     for x in ${EXCLUDES[@]+"${EXCLUDES[@]}"}; do ga+=("--exclude-dir=$x"); done
     (cd "$d" 2>/dev/null || exit 3; grep "${ga[@]}" -e "$term" -- . 2>/dev/null) > "$raw" || rc=$?
   fi
-  if [ "$rc" -ge 2 ] && { [ "$rc" -eq 3 ] || [ ! -s "$raw" ]; }; then
-    echo "impact-scan.sh: search failed in $label for term '$term'" >&2; exit 2
-  fi
   P="$prefix" R="$ALWAYS_EXCLUDE" awk '
     BEGIN { n = split(ENVIRON["R"], r, " ") }
-    { for (i = 1; i <= n; i++) if (index($0, "./" r[i] "/") == 1) next
-      sub(/^\.\//, ""); print ENVIRON["P"] $0 }' "$raw"
+    { for (i = 1; i <= n; i++) if (index($0, "./" r[i] "/") == 1 || index($0, "./" r[i] ":") == 1) next
+      sub(/^\.\//, ""); print ENVIRON["P"] $0 }' "$raw" > "$flt"
+  if [ "$rc" -ge 2 ] && { [ "$rc" -eq 3 ] || [ ! -s "$flt" ]; }; then
+    echo "impact-scan.sh: search failed in $label for term '$term' (an unreadable file or directory? add it to IMPACT_EXCLUDE, keeping the defaults)" >&2; exit 2
+  fi
+  cat "$flt"
 }
 
 # Marker setup. nocasematch makes [[ =~ ]] case-insensitive without a fork per hit.
