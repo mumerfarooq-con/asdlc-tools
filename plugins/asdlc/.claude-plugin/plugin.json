@@ -1,6 +1,21 @@
 {
   "name": "asdlc",
-  "version": "1.3.0",
-  "description": "PRD Implementor, PR Review, PDQC, Jira leg — commands and subagents",
-  "author": { "name": "Conovo Platform" }
+  "displayName": "ASDLC",
+  "version": "1.3.1",
+  "description": "Agentic SDLC workflows: plan a spec or Jira ticket with a human approval gate, build it task by task, review PRs with a three-lens council, and run a pre-delivery quality check.",
+  "author": {
+    "name": "Conovo Platform"
+  },
+  "homepage": "https://github.com/mumerfarooq-con/asdlc-tools",
+  "repository": "https://github.com/mumerfarooq-con/asdlc-tools",
+  "license": "MIT",
+  "keywords": [
+    "sdlc",
+    "planning",
+    "code-review",
+    "jira",
+    "bitbucket",
+    "quality",
+    "subagents"
+  ]
 }
