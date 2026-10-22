@@ -4,6 +4,17 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.3.1] - 2026-10-22
+
+### Changed
+
+- **README rewritten.** Every command is covered, including `/asdlc:jira-run`, `/asdlc:jira-setup` and `/asdlc:plan`. New sections cover requirements, a quick start per workflow, how approval works, the subagents and troubleshooting.
+- **Install instructions for the Claude desktop app.**
+  - The Code tab shares the Claude Code install.
+  - Customize → Plugins needs the repository added as a marketplace first, because ASDLC isn't in Anthropic's directory.
+  - There is an HTTPS fallback for clone errors.
+- **Plugin listing.** `plugin.json` gains `displayName`, a clearer description, `homepage`, `repository`, `license` and `keywords`. The marketplace descriptions now mention the Jira leg. A plugin-level `README.md` describes the commands and what data the plugin sends.
+
 ## [1.3.0] - 2026-10-21
 
 ### Added
@@ -26,6 +37,7 @@ Every PR that changes plugin content (commands, agents, PDQC assets) must bump t
 - Approval is `/asdlc:plan approve`, not hand-editing `status: approved`.
 - The suggested `.gitignore` lines gain `plans/*/` (impact.md can quote code) and `plans/*.plan.prev.md` (an old plan), and `jira-setup.sh check` warns when they are missing. Add them to existing repos.
 
+[1.3.1]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.3.1
 [1.3.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.3.0
 
 ## [1.2.0] - 2026-10-13
