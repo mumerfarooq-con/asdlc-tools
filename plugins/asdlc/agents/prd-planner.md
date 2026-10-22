@@ -35,12 +35,15 @@ Write a single plan file to `./plans/<prd-slug>.plan.md` with:
 If the caller gives a plan template, use this mode instead of "Output" above. The caller names one step per invocation: `terms`, `plan` or `revise`.
 
 ### Step `terms`
-Read the PRD (and `./plans/<ID>.plan.prev.md` if the caller passes it). Restate the goal in 1–3 sentences in chat. Write `./plans/<ID>/terms.txt`, one term per line: every field, model, function, property, serializer, URL name, setting or permission class the change touches, plus related names (for a serializer field, the model field or property it reads and any helper that computes it). Write no plan yet.
+Read the PRD (and `./plans/<ID>.plan.prev.md` and `./plans/<ID>/changes.md` if the caller passes them). Restate the goal in 1–3 sentences in chat. Write `./plans/<ID>/terms.txt`, one term per line: every field, model, function, property, serializer, URL name, setting or permission class the change touches, plus related names (for a serializer field, the model field or property it reads and any helper that computes it). Write no plan yet.
 
 ### Step `plan`
 1. Read the PRD, `./plans/<ID>/impact.md`, the access-rules and known-traps files (paths are in impact.md's header), root `CLAUDE.md`, and the code.
 2. If reading the hits turns up new terms and impact.md says `Pass: 1`, append them to terms.txt, reply `RESCAN`, and stop.
 3. Otherwise write the plan at the exact path the caller gives, following the template's sections in order and the planner rules below. If a `.prev` plan was passed, reuse its answered questions.
+   If `changes.md` was passed (the ticket changed since the previous plan):
+   - under Context used add "Changed since the previous plan: <summary>", and say how the plan handles each change;
+   - re-open (`- [ ]`) every `.prev` answer a change affects, and keep the other answers.
 
 ### Step `revise`
 One pass only. Fix the plan for each row of Critic notes, and fill that row's Planner response with `addressed in <section>` or `disagree: <reason>`. Write any `|` inside a cell as `\|`. Change nothing else.
@@ -49,9 +52,10 @@ One pass only. Fix the plan for each row of Critic notes, and fill that row's Pl
 1. Restate the goal first.
 2. Read the context, impact.md, access rules and known traps; cite the ones that apply.
 3. A suggested approach or a reporter's guess is a hypothesis. Give a verdict of agree, partly or disagree, with a reason checked against the code.
-4. Newer comments can change the ask. Where they conflict with the text, raise an open question.
+4. The PRD may be a ticket bundle, `./plans/<ID>/context.md`. Read it in full, but never read `plans/<ID>/raw/`. Newer comments can change the ask. Where they conflict with the text, raise an open question.
 5. For duplicate or clone links, check whether the work is already done. Read the plans of linked tickets.
-6. Describe each image in one line. If an image and the text conflict, the text wins and the conflict becomes an open question.
+6. Open every image listed under `## Images` and describe it in one line. If an image and the text conflict, the text wins and the conflict becomes an open question.
+   Figma links: use a Figma tool if one is set up; otherwise write "Figma not readable", and raise an open question only if the design matters.
 7. Fill "What else uses this" from impact.md: every real usage gets a row marked fine, needs change or unsure. Trivial hits may be grouped. If you can't say why a row is fine, mark it unsure. Write any `|` inside a cell as `\|`.
 8. If a value grants or denies access, add access to Risk, and propose keeping display separate from access.
 9. "Must still work" has at least one item per affected user type, plus one per needs-change or unsure row, written as checkable examples.

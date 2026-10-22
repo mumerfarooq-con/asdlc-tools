@@ -22,9 +22,10 @@ every problem line it prints, word for word. Nothing else.
 1. Run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate <ID>` and show the result with every problem line.
 2. `INVALID` → STOP. Tell me what to fix in the plan file (answer open questions, resolve critic
    blockers), then run this again. Do not fix it for me.
-3. `VALID` → run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh approve <ID>`. This is not
+3. `VALID` → run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-approve.sh <ID>`. This is not
    pre-approved on purpose: the harness asks me to confirm it, and only my confirmation approves.
-   Report what it prints (the new hash). If it refuses, relay the reason.
+   Report what it prints (the new hash). If it refuses, relay the reason. It refuses a plan whose ticket changed
+   after approval (STALE): tell me to `replan` it instead.
 
 ## replan
 Run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh replan <ID>`. It moves the plan to

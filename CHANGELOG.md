@@ -4,6 +4,28 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.4.0] - 2026-10-22
+
+### Added
+
+- **Full ticket context.** `jira/scripts/jira-context.sh fetch <KEY>` (Jira REST v2) writes `plans/<KEY>/context.md`, the planner's PRD for a ticket: the description, all human comments (newest first, paged), the parent ticket, one level of linked tickets (with a pointer to their own plans), image attachments and Figma links. `raw/` keeps the Jira responses and `build` turns them into `context.md`, so another source can be added later. Its output names only the file and counts, never ticket text.
+  - Images: png, jpeg, gif and webp only, checked by their first bytes; `MAX_IMAGES` (default 10, `0` turns downloads off) and `MAX_IMAGE_MB` (default 5). Downloads follow redirects over https only and never send the token to another host.
+  - Pipeline comments (starting with `PIPELINE_COMMENT_MARKER`, also in the wiki-escaped form `\[asdlc\]`) are left out. An empty or blank marker is refused. Start any Jira automation comment with the marker.
+  - Every Jira GET now has a 60 second limit, and a 429 gets a hint.
+- **Ticket fingerprint.** `build` hashes what a person would re-read (title, description, human comments, parent key, links, attachment ids; not status, assignee, sprint, rank or timestamps) into `plans/<KEY>/fingerprint`. `stamp` copies `ticket_fingerprint`, `fingerprint_at` and `fingerprint_source` into the plan header, outside the plan hash. `plan-state.sh set` refuses these fields.
+- **Stale check.** `jira-context.sh check <plan>` fetches the ticket again (GETs only) and prints `FRESH` (exit 0), `STALE <summary>` (exit 17) or `UNCHECKED <reason>` (exit 21); exit 2 means it refused (not runnable, not a Jira plan, no fingerprint). A STALE plan is set to `stale`, copied to `.plan.prev.md`, and `plans/<KEY>/changes.md` lists the changes (comment ids, a description diff of at most 200 lines, parent, links, attachments). `/asdlc:jira-run` Phase A runs it before each approved plan; Phase B re-plans every STALE plan in the same run, even outside `--key`/`--sprint`, and the planner and critic read `changes.md`. A plan that `--reset-executing` restored gets the same check, and the report names its recorded branch. Plan and execute a ticket with the same Jira account: restricted comments differ by account and would give a false STALE.
+- `scripts/plan-approve.sh`: approval, split out of `plan-state.sh` (shared helpers are in `scripts/plan-lib.sh`). Same behaviour and exit codes, reached only through `/asdlc:plan approve`, never pre-approved.
+- `jira-setup.sh check` validates `MAX_IMAGES`, `MAX_IMAGE_MB` (whole numbers) and a non-empty marker.
+
+### Changed
+
+- **`plan-state.sh approve` is removed**; use `/asdlc:plan approve` (it calls `plan-approve.sh`).
+- **`approve` refuses a STALE plan** (it used to allow it). Re-plan instead.
+- **Plans approved under 1.3.x have no fingerprint.** `/asdlc:jira-run` Phase A reports them as "re-plan" and does not run them: re-plan them first. Plans without a Jira ticket have none either. Standalone `/asdlc:implement-prd --execute` still runs them, and warns when a plan does have a fingerprint, because no stale check ran.
+- `ticket-to-prd.sh` is deprecated: `/asdlc:jira-run` no longer uses it (it is no longer in its pre-approved tools).
+- `jira-mine.sh` no longer requests or prints ticket descriptions, so ticket text stays out of the run's own context.
+- The planner, `plan-critic` and the plan template cover the new context: comments followed, parent and linked tickets, images, access rules, and what changed since the previous plan.
+
 ## [1.3.1] - 2026-10-22
 
 ### Changed
@@ -37,6 +59,7 @@ Every PR that changes plugin content (commands, agents, PDQC assets) must bump t
 - Approval is `/asdlc:plan approve`, not hand-editing `status: approved`.
 - The suggested `.gitignore` lines gain `plans/*/` (impact.md can quote code) and `plans/*.plan.prev.md` (an old plan), and `jira-setup.sh check` warns when they are missing. Add them to existing repos.
 
+[1.4.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.4.0
 [1.3.1]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.3.1
 [1.3.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.3.0
 

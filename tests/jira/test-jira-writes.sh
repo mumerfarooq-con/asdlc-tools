@@ -51,7 +51,22 @@ assert_eq "$(posts | jq -c '[.[] | select(.path | endswith("/watchers")) | .body
 comment="$(posts | jq -c '[.[] | select(.path == "/rest/api/3/issue/PROJ-1/comment")]')"
 assert_eq "$(jq 'length' <<<"$comment")" "1" "one comment"
 assert_eq "$(jq -c '.[0].body.body.content[0].content' <<<"$comment")" \
-  '[{"type":"text","text":"Ready. "},{"type":"mention","attrs":{"id":"acc-1"}},{"type":"mention","attrs":{"id":"acc-2"}}]'
+  '[{"type":"text","text":"[asdlc] Ready. "},{"type":"mention","attrs":{"id":"acc-1"}},{"type":"mention","attrs":{"id":"acc-2"}}]'
+
+t "notify: the comment text starts with the marker, and an empty or multi-line marker is refused before any call"
+sandbox 'NOTIFY_ACCOUNT_IDS=acc-1' 'PIPELINE_COMMENT_MARKER=[bot]'; use_fixtures basic
+run "$S/jira-notify.sh" PROJ-1 "Ready."
+assert_eq "$(posts | jq -r '[.[] | select(.path | endswith("/comment"))][0].body.body.content[0].content[0].text')" "[bot] Ready. " "custom marker"
+sandbox 'NOTIFY_ACCOUNT_IDS=acc-1' 'PIPELINE_COMMENT_MARKER='; use_fixtures basic
+run "$S/jira-notify.sh" PROJ-1 "Ready."
+assert_eq "$CODE" "1" "exit"; assert_contains "$ERR" "PIPELINE_COMMENT_MARKER" "reason"; assert_eq "$(requests)" "[]" "no request"
+sandbox 'NOTIFY_ACCOUNT_IDS=acc-1'; use_fixtures basic
+PIPELINE_COMMENT_MARKER=$'a\nb' run bash -c '. "$1/lib.sh"; ASDLC_CONF_FILE=x; asdlc_need_marker' _ "$S"
+assert_eq "$CODE" "1" "multi-line marker refused"
+PIPELINE_COMMENT_MARKER='  '$'\t' run bash -c '. "$1/lib.sh"; ASDLC_CONF_FILE=x; asdlc_need_marker' _ "$S"
+assert_eq "$CODE" "1" "whitespace-only marker refused"; assert_contains "$ERR" "whitespace" "reason"
+PIPELINE_COMMENT_MARKER='[a]' run bash -c '. "$1/lib.sh"; ASDLC_CONF_FILE=x; asdlc_need_marker' _ "$S"
+assert_eq "$CODE" "0" "a normal marker passes"
 
 t "notify without people configured fails before any call"
 sandbox; use_fixtures basic

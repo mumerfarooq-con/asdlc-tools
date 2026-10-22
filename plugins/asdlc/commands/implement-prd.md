@@ -1,7 +1,7 @@
 ---
 description: Orchestrate PRD implementation (plan → execute → review → test), plan only and stop for file-based approval, execute an approved plan, or run a retrospective review of an already-completed PRD
 argument-hint: <path-to-prd | path-to-plan> [--plan-only | --execute | --review-only]
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh:*)
 ---
 
 You are orchestrating work for: $ARGUMENTS
@@ -40,10 +40,11 @@ Nothing is implemented in this mode. Approval is never yours and never interacti
 the open questions in the plan file, then approves with `/asdlc:plan approve <ID>`.
 You write files only where a step says so. Never edit the plan except to insert the critic's rows
 in step 5; every other change to it is the planner's.
-1. Pick the plan id `<ID>`: the ticket key in the PRD's title if it has one (e.g. `PROJ-142`),
-   else the PRD file's basename. The plan path is `./plans/<ID>.plan.md`. If
-   `./plans/<ID>.plan.prev.md` exists, this is a re-plan: pass that path to the planner as earlier
-   context (its answered questions are reused).
+1. Pick the plan id `<ID>`: for a PRD at `./plans/<KEY>/context.md` it is `<KEY>`; otherwise the
+   ticket key in the PRD's title if it has one (e.g. `PROJ-142`), else the PRD file's basename. The
+   plan path is `./plans/<ID>.plan.md`. If `./plans/<ID>.plan.prev.md` exists, this is a re-plan:
+   pass that path to the planner as earlier context (its answered questions are reused). If
+   `./plans/<ID>/changes.md` also exists (the ticket changed), pass it with the `.prev` path.
 2. Invoke `prd-planner` with step `terms`, the PRD path, `<ID>`, and the `.prev` path if there is one.
    It writes `./plans/<ID>/terms.txt` and no plan.
 3. Run the impact scan from the repo root: `${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh <ID>`,
@@ -52,11 +53,12 @@ in step 5; every other change to it is the planner's.
 4. Invoke `prd-planner` with step `plan`, the PRD path, `<ID>`, the template path
    `./plans/<ID>/plan-template.md` (step 3 copied it there; subagents may not be allowed to read the
    plugin dir), and the exact output path `./plans/<ID>.plan.md`
-   (plus the `.prev` path on a re-plan).
+   (plus the `.prev` path, and `changes.md` if there is one, on a re-plan).
    - If it replies `RESCAN`, run `${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh <ID>` again (pass 2,
      no `--reset`); if it exits non-zero, report its message and STOP. Otherwise invoke step `plan` once more. A second `RESCAN` is not allowed: report it and STOP.
-5. Invoke `plan-critic` with only these paths: the plan, the PRD, `./plans/<ID>/impact.md`, and the
-   access-rules and known-traps paths from impact.md's header. Pass nothing else, and never the
+5. Invoke `plan-critic` with only these paths: the plan, the PRD (`context.md` for a Jira ticket),
+   `./plans/<ID>/impact.md`, the access-rules and known-traps paths from impact.md's header, and
+   `./plans/<ID>/changes.md` on a re-plan that has one. Pass nothing else, and never the
    planner's notes. Insert its rows, unchanged, into the plan's "Critic notes" table with Edit
    (replace the placeholder row if the table has one). Do not touch any other line.
 6. Invoke `prd-planner` with step `revise` and the plan path. It fixes the plan for each critic row
@@ -85,6 +87,9 @@ in step 5; every other change to it is the planner's.
      `BLOCKED` `EXECUTING` `DONE` `FAILED` `SKIP` `MISSING`. On `INVALID`, relay the problems and say
      the plan was written before 1.3.0 or is incomplete, and must be re-planned (`/asdlc:plan replan <ID>`,
      then `--plan-only`). Never implement a plan that is not RUNNABLE and VALID.
+   - If `plan-state.sh get <plan> ticket_fingerprint` prints a value, warn the user, without stopping:
+     "this plan records a ticket fingerprint and no stale check ran; use `/asdlc:jira-run` to check
+     the ticket first." Then continue.
 2. **Start:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status executing`.
    This command owns that transition, so the caller never sets it first. If it refuses, report why and STOP.
 3. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan, with

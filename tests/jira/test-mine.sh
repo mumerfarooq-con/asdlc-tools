@@ -14,8 +14,13 @@ assert_eq "$(requests | jq -r '.[0].path')" "/rest/api/2/search/jql" "endpoint"
 t "output shape"
 assert_eq "$(jq -r '.[0].url' <<<"$OUT")" "https://example.atlassian.net/browse/PROJ-1" "url"
 assert_eq "$(jq -r '.[0].type + "|" + .[0].status + "|" + .[0].priority' <<<"$OUT")" "Bug|To Do|High"
-assert_eq "$(jq -r '.[1].priority + "|" + .[1].description' <<<"$OUT")" "None|" "nulls"
-assert_eq "$(jq -c 'map(keys)|.[0]' <<<"$OUT")" '["description","key","labels","priority","status","summary","type","url"]'
+assert_eq "$(jq -r '.[1].priority' <<<"$OUT")" "None" "null priority"
+assert_eq "$(jq -c 'map(keys)|.[0]' <<<"$OUT")" '["key","labels","priority","status","summary","type","url"]'
+
+t "descriptions are neither requested nor printed (ticket text stays out of the orchestrator)"
+assert_not_contains "$OUT" "badge says Enrolled" "description text"
+assert_not_contains "$OUT" "description" "description key"
+assert_not_contains "$(requests | jq -r '.[0].args | map(select(startswith("fields="))) | .[0]')" "description" "fields requested"
 
 t "STATUS_DEFAULT list from the config"
 sandbox 'STATUS_DEFAULT=To Do, Idea'; use_fixtures basic

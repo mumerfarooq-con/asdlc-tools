@@ -52,12 +52,13 @@ else
   JQL="$JQL ORDER BY created ASC"
 fi
 
-# /rest/api/3/search is gone (410); the v2 search/jql endpoint returns
-# descriptions as plain wiki text, which is what the planner reads.
+# /rest/api/3/search is gone (410); the v2 search/jql endpoint is the
+# supported search. Descriptions are not requested: ticket text is read only by
+# jira-context.sh, so it stays out of the orchestrator's context.
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 code=$(asdlc_http jira GET /rest/api/2/search/jql "$tmp" \
         --data-urlencode "jql=$JQL" \
-        --data-urlencode "fields=summary,description,status,priority,issuetype,labels" \
+        --data-urlencode "fields=summary,status,priority,issuetype,labels" \
         --data-urlencode "maxResults=50")
 if ! asdlc_http_ok "$code"; then
   asdlc_http_fail jira "$code" "$tmp" "the ticket search"
@@ -72,6 +73,5 @@ jq --arg base "$JIRA_BASE_URL" '[.issues[] | {
     status:      .fields.status.name,
     priority:    (.fields.priority.name // "None"),
     labels:      .fields.labels,
-    url:         ($base + "/browse/" + .key),
-    description: (.fields.description // "")
+    url:         ($base + "/browse/" + .key)
   }]' "$tmp"

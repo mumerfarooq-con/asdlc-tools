@@ -8,7 +8,13 @@
 <Restate the goal in 1-3 sentences, in your own words.>
 
 ## Context used
-<Ticket sections, comments, access rules and known traps you read, one bullet each. Cite the ones that apply.>
+<One bullet each. Cite the ones that apply.>
+- Ticket sections: <the sections of the ticket you read>
+- Comments followed: <comment ids, and what each changed or confirmed>
+- Parent and linked tickets: <keys, and what they told you; earlier plans of linked tickets>
+- Images: <the images you opened>
+- Access rules and traps: <the access rules and known traps that apply>
+- Changed since the previous plan: <what changed in the ticket and how this plan handles it, or "first plan">
 
 ## Visual reference
 <One line per image: what it shows. If an image and the text conflict, the text wins and the conflict is an open question. Write "None" if there are no images.>

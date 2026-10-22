@@ -97,6 +97,12 @@ do_check() {
   done
   case "$TICKET_CHECK_MODE" in strict|warn) ;; *) fail "TICKET_CHECK_MODE must be strict or warn (is '$TICKET_CHECK_MODE')" ;; esac
   case "$BB_AUTH" in bearer|basic) ;; *) fail "BB_AUTH must be bearer or basic (is '$BB_AUTH')" ;; esac
+  # Ticket-context settings: jira-context.sh refuses to run on a bad value, so say so here.
+  for k in MAX_IMAGES MAX_IMAGE_MB; do
+    [[ "${!k}" =~ ^[0-9]+$ ]] || fail "$k must be a whole number (is '${!k}')"
+  done
+  [ -n "$(asdlc_trim "$PIPELINE_COMMENT_MARKER")" ] || fail "PIPELINE_COMMENT_MARKER must not be empty: the pipeline's Jira comments start with it"
+  case "$PIPELINE_COMMENT_MARKER" in *$'\n'*) fail "PIPELINE_COMMENT_MARKER must be one line" ;; esac
   # Where the tokens would go: refuse before any call. The checks exit on a bad
   # value, so run them in a subshell and report the reason as a FAIL line.
   local why

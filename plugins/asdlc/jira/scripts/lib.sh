@@ -163,26 +163,84 @@ asdlc_need_bb() {
   if [ "$BB_AUTH" = "basic" ]; then : "${BITBUCKET_EMAIL:?set BITBUCKET_EMAIL (BB_AUTH=basic)}"; fi
 }
 
+# asdlc_curl_args <jira|bb> <METHOD> <path> <outfile> [curl args...]
+# Builds curl's whole argument list into the global array ASDLC_CURL_ARGV
+# (bash 3.2 can't return an array). Tests look the arguments up by name.
+# ASDLC_CURL_ACCEPT overrides the Accept header (downloads send */*).
+asdlc_curl_args() {
+  local svc="$1" method="$2" path="$3" out="$4"; shift 4
+  ASDLC_CURL_ARGV=(-sS -o "$out" -w '%{http_code}' -H "Accept: ${ASDLC_CURL_ACCEPT:-application/json}")
+  case "$svc" in
+    jira) ASDLC_CURL_ARGV+=(--user "$JIRA_EMAIL:$JIRA_TOKEN"); path="$JIRA_BASE_URL$path" ;;
+    bb)   if [ "$BB_AUTH" = "basic" ]; then ASDLC_CURL_ARGV+=(--user "$BITBUCKET_EMAIL:$BITBUCKET_TOKEN")
+          else ASDLC_CURL_ARGV+=(-H "Authorization: Bearer $BITBUCKET_TOKEN"); fi
+          path="https://api.bitbucket.org/2.0$path" ;;
+    *)    asdlc_die "asdlc_http: unknown service $svc" ;;
+  esac
+  if [ "$method" = "GET" ]; then ASDLC_CURL_ARGV+=(-G); else ASDLC_CURL_ARGV+=(-X "$method"); fi
+  # "--" ends option parsing, so the URL can never be read as a curl option.
+  ASDLC_CURL_ARGV+=(${@+"$@"} -- "$path")
+}
+
 # asdlc_http <jira|bb> <METHOD> <path> <outfile> [curl args...]
 # Writes the response body to <outfile> and prints the HTTP status code
 # (000 when the host can't be reached). Paths are relative to the service's
 # API root: "/rest/api/2/..." for Jira, "/repositories/..." for Bitbucket.
+# curl's exit status is left in ASDLC_CURL_RC for callers that don't run this
+# in a $(...) subshell.
 asdlc_http() {
   local svc="$1" method="$2" path="$3" out="$4"; shift 4
+  ASDLC_CURL_RC=0
   if [ -n "$ASDLC_FIXTURES" ]; then asdlc_fixture_http "$svc" "$method" "$path" "$out" "$@"; return; fi
-  local args=(-sS -o "$out" -w '%{http_code}' -H "Accept: application/json")
-  case "$svc" in
-    jira) args+=(--user "$JIRA_EMAIL:$JIRA_TOKEN"); path="$JIRA_BASE_URL$path" ;;
-    bb)   if [ "$BB_AUTH" = "basic" ]; then args+=(--user "$BITBUCKET_EMAIL:$BITBUCKET_TOKEN")
-          else args+=(-H "Authorization: Bearer $BITBUCKET_TOKEN"); fi
-          path="https://api.bitbucket.org/2.0$path" ;;
-    *)    asdlc_die "asdlc_http: unknown service $svc" ;;
-  esac
-  if [ "$method" = "GET" ]; then args+=(-G); else args+=(-X "$method"); fi
+  asdlc_curl_args "$svc" "$method" "$path" "$out" "$@"
   local code
-  # "--" ends option parsing, so the URL can never be read as a curl option.
-  code="$(curl "${args[@]}" "$@" -- "$path")" || code="000"
+  code="$(curl "${ASDLC_CURL_ARGV[@]}")" || { ASDLC_CURL_RC=$?; code="000"; }
   printf '%s' "${code:-000}"
+}
+
+# Jira issue keys, and the marker that tags the pipeline's own comments.
+asdlc_is_key() { [[ ${1:-} =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; }
+asdlc_need_marker() {
+  case "${PIPELINE_COMMENT_MARKER:-}" in
+    '') asdlc_die "PIPELINE_COMMENT_MARKER is empty in $ASDLC_CONF_FILE; the pipeline's comments must start with a marker." ;;
+    *$'\n'*) asdlc_die "PIPELINE_COMMENT_MARKER in $ASDLC_CONF_FILE must be one line." ;;
+  esac
+  # Whitespace only would match every comment's leading text, so it is as bad as empty.
+  [ -n "$(asdlc_trim "$PIPELINE_COMMENT_MARKER")" ] ||
+    asdlc_die "PIPELINE_COMMENT_MARKER is only whitespace in $ASDLC_CONF_FILE; the pipeline's comments must start with a marker."
+}
+
+# asdlc_download <path> <dest> <max_bytes>
+# Fetch a Jira attachment (only /rest/api/2/attachment/content/<numeric id>, so
+# the token goes only to JIRA_BASE_URL) and keep it as <dest> if it is a png,
+# jpeg, gif or webp within <max_bytes>. Prints one word: the HTTP status when
+# stored or when the call failed, "size" or "type" when the bytes were
+# rejected. Returns 0 only when <dest> was written. Redirects are followed
+# (attachments live on a media host) but never with --location-trusted, so
+# credentials stay with JIRA_BASE_URL.
+asdlc_download() {
+  local path="$1" dest="$2" max="$3" tmp codef code size hex
+  if ! [[ $path =~ ^/rest/api/2/attachment/content/[0-9]+$ ]] || ! [[ $max =~ ^[0-9]+$ ]]; then
+    echo "asdlc_download: refused path or limit" >&2; printf 'path'; return 1
+  fi
+  mkdir -p "$(dirname "$dest")"
+  tmp="$(mktemp "$dest.XXXXXX")"; codef="$(mktemp)"
+  ASDLC_CURL_ACCEPT='*/*' asdlc_http jira GET "$path" "$tmp" \
+    -L --max-redirs 3 --proto =https --proto-redir =https \
+    --max-filesize "$max" --max-time 60 >"$codef"
+  code="$(cat "$codef")"; rm -f "$codef"
+  if [ "$ASDLC_CURL_RC" = "63" ]; then rm -f "$tmp"; printf 'size'; return 1; fi  # curl: file too large
+  if ! asdlc_http_ok "$code"; then rm -f "$tmp"; printf '%s' "$code"; return 1; fi
+  size="$(wc -c < "$tmp" | tr -d ' ')"
+  if [ "$size" -gt "$max" ]; then rm -f "$tmp"; printf 'size'; return 1; fi
+  hex="$(head -c 12 "$tmp" | od -An -tx1 | tr -d ' \n')"
+  case "$hex" in
+    89504e470d0a1a0a*|ffd8ff*|474946383761*|474946383961*) ;;
+    52494646????????57454250*) ;;
+    *) rm -f "$tmp"; printf 'type'; return 1 ;;
+  esac
+  mv "$tmp" "$dest"
+  printf '%s' "$code"
 }
 
 # Fixture mode: GET <path> reads $ASDLC_FIXTURES/<svc><path>.json (a nonzero
@@ -242,6 +300,7 @@ asdlc_http_fail() {  # <jira|bb> <code> <bodyfile> [context]
   case "$svc:$code" in
     jira:401) echo "  -> Auth failed. Check JIRA_EMAIL, and that JIRA_TOKEN is a Jira API token (not the Bitbucket one)." >&2 ;;
     jira:403) echo "  -> No permission for this call on the project." >&2 ;;
+    jira:429) echo "  -> Jira is rate limiting this account. Wait a minute and run it again." >&2 ;;
     jira:404) echo "  -> Not found. Check JIRA_BASE_URL and JIRA_PROJECT_KEY in $ASDLC_CONF_FILE, and the issue key." >&2 ;;
     bb:401)   echo "  -> Auth failed. Check BITBUCKET_TOKEN; for a personal API token set BB_AUTH=basic and BITBUCKET_EMAIL." >&2 ;;
     bb:404)   echo "  -> Not found. Check BB_WORKSPACE and BB_REPO in $ASDLC_CONF_FILE." >&2 ;;

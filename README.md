@@ -108,7 +108,7 @@ Every task goes through executor, reviewer and tester before the next one starts
 /asdlc:jira-run          # builds approved plans and opens PRs; plans anything new
 ```
 
-Each approved ticket gets its own `feature/<KEY>-<slug>` branch, a Bitbucket PR and a review. You merge it yourself. Runs are locked and resume after a crash. The [Jira leg guide](plugins/asdlc/jira/README.md) covers configuration, crash recovery and the merge-to-Testing automation.
+Each approved ticket gets its own `feature/<KEY>-<slug>` branch, a Bitbucket PR and a review. You merge it yourself. Before each plan runs, the ticket is checked: if it changed after you approved the plan, the plan is marked stale and re-planned in the same run, and you approve it again. Runs are locked and resume after a crash. The [Jira leg guide](plugins/asdlc/jira/README.md) covers configuration, crash recovery and the merge-to-Testing automation.
 
 ### Review a pull request
 
@@ -140,7 +140,7 @@ Then set `use_seed_checklist: true` and the `seed_checklist` path in your repo's
 ## How approval works
 
 - **Plans are approved in the file, by a person.** `/asdlc:plan approve` checks that the plan is complete: required sections filled, open questions answered, critic blockers answered. It then records a hash of the approved part. No command pre-approves that step, so Claude Code always asks you to confirm it.
-- **An edited plan no longer runs.** If the approved part changes after approval, the plan reports `EDITED` and stops until it is re-approved. Agents log progress below a marker that the hash doesn't cover, so a run's own logging never voids the approval.
+- **An edited plan no longer runs.** If the approved part changes after approval, the plan reports `EDITED` and stops until it is re-approved. If a Jira ticket changes after approval, the plan reports `STALE` and is re-planned, and `approve` refuses a stale plan. Agents log progress below a marker that the hash doesn't cover, so a run's own logging never voids the approval.
 - **No silent writes to shared systems.** Commits, pushes and Bitbucket writes are not pre-approved; each one is shown to you first.
 - **Tokens stay in your environment.** The Jira token is sent only to your configured Jira URL.
 
