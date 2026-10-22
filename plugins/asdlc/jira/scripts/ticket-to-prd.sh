@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Turn one Jira ticket into a PRD markdown file for /asdlc:implement-prd. Prints the path.
 # Usage: ticket-to-prd.sh <ISSUE-KEY> [--conf <file>] [--fixtures <dir>]
+# Deprecated in 1.4.0; not used by jira-run; use jira-context.sh (scheduled for removal in 2.0.0).
 set -euo pipefail
+echo "ticket-to-prd.sh is deprecated; jira-run uses jira-context.sh" >&2
 . "$(dirname "$0")/lib.sh"
 asdlc_init "$@"; set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
 asdlc_need_jira

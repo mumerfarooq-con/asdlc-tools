@@ -146,6 +146,10 @@ ticket text. The planner reads `context.md` and the images, never `raw/`.
   The pipeline's own comments carry it, and so should any Jira automation comment (for example
   "Merged, moved to Testing"): otherwise each one counts as a human edit and makes the plan stale.
   An empty or blank marker is refused.
+  Any Jira user who starts a comment with the marker hides that comment from the planner and from the
+  fingerprint; this is by design, and nothing runs on such a comment. Changing `PIPELINE_COMMENT_MARKER`
+  makes every approved plan read STALE once, with the details unavailable, so choose the marker once
+  and keep it.
 - Every Jira GET has a 60 second limit. A 429 (rate limited) gives a hint to wait and retry.
 - A plan that already exists (pending, approved or anything but `stale`) is never overwritten:
   `fetch` exits 2 and changes nothing.

@@ -34,7 +34,7 @@ List plan files: `ls ./plans/*.plan.md`. For each, run
 - `RUNNABLE` → run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate <plan>`. `VALID` → implement
   it, after the stale check below. `INVALID` → skip; report "<KEY>: plan doesn't validate — re-plan".
 - `EDITED` → skip; report "<KEY>: plan edited since approval — re-approve".
-- `STALE` → skip; report "<KEY>: ticket changed since approval — re-plan". Phase B re-plans it.
+- `STALE` → skip; report "<KEY>: ticket changed since approval — re-plan". Phase B re-plans it (in this run, or in the next planning run under `--execute-only`).
 - `NEEDS_INFO` `BLOCKED` → skip; report "<KEY>: <word>".
 - `EXECUTING` `PENDING` `DONE` `FAILED` `SKIP` `MISSING` → skip (mention EXECUTING/FAILED, stay quiet on the rest).
 
@@ -44,7 +44,8 @@ text. Never run a plan unless it is RUNNABLE, VALID and FRESH.
 - `FRESH` (exit 0) → implement it (steps below).
 - `STALE <summary>` (exit 17) → the plan is now `stale` and its `.prev` and `changes.md` exist. Do not
   run it. Report "<KEY>: ticket changed since approval — <summary>", adding the `branch: <name>` line if
-  the check printed one (work was already done on it). Queue the plan for Phase B.
+  the check printed one (work was already done on it). Queue the plan for Phase B (under `--execute-only`
+  it stays `stale` on disk and the next planning run re-plans it).
 - `UNCHECKED <reason>` (exit 21) → do not run it; report "<KEY>: not run — <reason>". The plan is untouched.
 - Exit 2 → do not run it; relay the message. A plan with no fingerprint (approved before 1.4.0, or not
   a Jira plan) is reported as "<KEY>: no ticket fingerprint — re-plan".

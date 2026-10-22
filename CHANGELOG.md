@@ -22,7 +22,7 @@ Every PR that changes plugin content (commands, agents, PDQC assets) must bump t
 - **`plan-state.sh approve` is removed**; use `/asdlc:plan approve` (it calls `plan-approve.sh`).
 - **`approve` refuses a STALE plan** (it used to allow it). Re-plan instead.
 - **Plans approved under 1.3.x have no fingerprint.** `/asdlc:jira-run` Phase A reports them as "re-plan" and does not run them: re-plan them first. Plans without a Jira ticket have none either. Standalone `/asdlc:implement-prd --execute` still runs them, and warns when a plan does have a fingerprint, because no stale check ran.
-- `ticket-to-prd.sh` is deprecated: `/asdlc:jira-run` no longer uses it (it is no longer in its pre-approved tools).
+- `ticket-to-prd.sh` is deprecated: `/asdlc:jira-run` no longer uses it (it is no longer in its pre-approved tools); scheduled for removal in 2.0.0. It now prints a one-line deprecation note on stderr.
 - `jira-mine.sh` no longer requests or prints ticket descriptions, so ticket text stays out of the run's own context.
 - The planner, `plan-critic` and the plan template cover the new context: comments followed, parent and linked tickets, images, access rules, and what changed since the previous plan.
 

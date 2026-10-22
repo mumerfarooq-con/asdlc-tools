@@ -6,6 +6,7 @@ t "writes the PRD and prints its path"
 sandbox; use_fixtures basic
 run "$S/ticket-to-prd.sh" PROJ-1
 assert_eq "$CODE" "0" "exit"; assert_eq "$OUT" "./prds/PROJ-1.md" "stdout"
+assert_eq "$ERR" "ticket-to-prd.sh is deprecated; jira-run uses jira-context.sh" "one deprecation line on stderr"
 cat > expected.md <<'EOF'
 # PROJ-1: Course page shows wrong badge
 

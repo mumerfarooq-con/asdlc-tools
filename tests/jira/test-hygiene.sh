@@ -162,6 +162,7 @@ assert_contains "$phb" "STALE" "Phase B names STALE plans"
 assert_contains "$phb" "jira-context.sh fetch" "Phase B fetches the context bundle"
 assert_contains "$phb" "context.md" "Phase B plans from context.md"
 assert_contains "$jr" "RUNNABLE, VALID and FRESH" "Phase A needs FRESH"
+assert_contains "$jr" "or in the next planning run under \`--execute-only\`" "Phase A STALE line says when --execute-only re-plans"
 assert_contains "$(cat "$P/commands/implement-prd.md")" "ticket_fingerprint" "implement-prd warns on a fingerprinted plan (D10)"
 assert_contains "$(cat "$P/commands/implement-prd.md")" "changes.md" "implement-prd passes changes.md on a re-plan"
 

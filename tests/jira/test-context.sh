@@ -90,6 +90,21 @@ assert_eq "$(ls plans/PROJ-1/assets | tr '\n' ' ')" "10001-badge_screenshot.png 
 t "figma links, and a linked ticket's earlier plan"
 assert_contains "$C" $'## Figma links\n- https://www.figma.com/file/AbC123/badge?node-id=1' "figma stops at ]"
 assert_not_contains "${C#*## Figma links}" "example.org" "non-figma url in the figma list"
+
+t "figma links: one with a backtick, < or >, or over 300 characters is dropped; a normal one stays"
+ctx_sandbox
+LONG="https://www.figma.com/file/$(printf 'x%.0s' $(seq 1 1000))"
+OK300="https://www.figma.com/file/$(printf 'y%.0s' $(seq 1 270))"
+jq --arg l "$LONG" --arg k "$OK300" '.fields.description += "\nTick: https://www.figma.com/file/BAD`TICK/x Angle: https://www.figma.com/file/BAD<ANGLE/x Close: https://www.figma.com/file/BAD>CLOSE/x Long: \($l) Edge: \($k) Good: https://www.figma.com/file/GOOD789/ok"' \
+  "fx/$API/issue/PROJ-1.json" > fx/t && mv fx/t "fx/$API/issue/PROJ-1.json"
+run "$JC" fetch PROJ-1; assert_eq "$CODE" "0" "exit"
+C="$(cat plans/PROJ-1/context.md)"; FIG="${C#*## Figma links}"
+assert_contains "$FIG" "- https://www.figma.com/file/GOOD789/ok" "normal link kept"
+assert_contains "$FIG" "- https://www.figma.com/file/AbC123/badge?node-id=1" "the fixture link kept"
+assert_contains "$FIG" "- $OK300" "a link under the cap kept"
+assert_not_contains "$FIG" "BAD" "backtick, < and > links dropped"
+assert_not_contains "$FIG" "xxxxxxxxxx" "1000-character link dropped"
+assert_not_contains "$FIG" '`TICK' "backtick link dropped"
 ctx_sandbox; mkdir plans; plan_file PROJ-5 pending; run "$JC" fetch PROJ-1
 assert_contains "$(cat plans/PROJ-1/context.md)" "| PROJ-5 | Fix the \\| pipe | In Progress | plans/PROJ-5.plan.md |" "earlier plan path"
 assert_contains "$(cat plans/PROJ-1/context.md)" "| PROJ-6 | Related thing | Done | none |" "no plan for the other"
@@ -154,15 +169,20 @@ for st in pending approved executing done; do
 done
 ctx_sandbox; plan_file PROJ-1 pending; run "$JC" build PROJ-1 --source rest; assert_eq "$CODE" "2" "build refuses too"
 
-t "a STALE plan is moved to .prev and changes.md is kept; a fresh context deletes an old changes.md"
-ctx_sandbox; plan_file PROJ-1 stale; cp plans/PROJ-1.plan.md "$SB/before"
-mkdir -p plans/PROJ-1; echo "old changes" > plans/PROJ-1/changes.md
+t "a STALE plan is moved to .prev and its own changes.md is kept; a fresh context deletes an old changes.md"
+FPA="sha256:$(printf 'a%.0s' $(seq 1 64))"
+ctx_sandbox; plan_file PROJ-1 stale; sed "s/^status: stale/&\nticket_fingerprint: $FPA/" plans/PROJ-1.plan.md > plans/t && mv plans/t plans/PROJ-1.plan.md
+cp plans/PROJ-1.plan.md "$SB/before"
+mkdir -p plans/PROJ-1; printf 'old changes\nApproved fingerprint: %s\n' "$FPA" > plans/PROJ-1/changes.md
 run "$JC" fetch PROJ-1
 assert_eq "$CODE" "0" "exit"; [ ! -e plans/PROJ-1.plan.md ] && ok || nok "plan still in place"
 cmp -s plans/PROJ-1.plan.prev.md "$SB/before" && ok || nok ".prev differs from the stale plan"
-assert_eq "$(cat plans/PROJ-1/changes.md)" "old changes" "changes.md kept"
+assert_eq "$(head -n1 plans/PROJ-1/changes.md)" "old changes" "changes.md kept"
 ctx_sandbox; mkdir -p plans/PROJ-1; echo "old changes" > plans/PROJ-1/changes.md; run "$JC" fetch PROJ-1
 [ ! -e plans/PROJ-1/changes.md ] && ok || nok "old changes.md kept for a fresh context"
+ctx_sandbox; plan_file PROJ-1 stale; mkdir -p plans/PROJ-1; printf 'old changes\nApproved fingerprint: %s\n' "$FPA" > plans/PROJ-1/changes.md
+run "$JC" fetch PROJ-1
+[ ! -e plans/PROJ-1/changes.md ] && ok || nok "changes.md kept for a .prev with no fingerprint"
 
 t "fetch removes an old fingerprint first: a failed fetch leaves none"
 ctx_sandbox; run "$JC" fetch PROJ-1; assert_file plans/PROJ-1/fingerprint
@@ -221,6 +241,14 @@ assert_eq "$("$JC" fingerprint plans/PROJ-1/raw)" "$BASE" "no config needed"
 mv "$SB/jira.conf.off" .asdlc/jira.conf
 run "$JC" fetch PROJ-1 >/dev/null 2>&1
 assert_eq "$(fp plans/PROJ-1/raw)" "$BASE" "a second fetch of the same ticket"
+
+# Pinned values: one literal per fixture, so a run on another machine (or another jq, awk, sort
+# or sha) that hashes differently fails here instead of turning approved plans STALE. If the
+# preimage changes on purpose, change asdlc-ticket-fp-v1 with it and update these.
+t "fingerprint: pinned values (the fixture ticket, and a non-text description through tojson)"
+assert_eq "$BASE" "sha256:539f9a45a7671f6d28c14e97aea583810ddf093a1c1f90c95cadaa107d957c64" "pinned fingerprint of the fixture raw dir"
+assert_eq "$(fp "$FIXTURES/context/fp-nonstring")" "sha256:cae23bca8ac7b58d5a02c75fecd7a172178e2f08132ba3435e4249b3d10fdb0a" "pinned fingerprint with a non-string description"
+differs_from() { :; }
 
 same() {  # <what> <raw dir>
   assert_eq "$(fp "$2")" "$BASE" "$1 must not change the fingerprint"
@@ -294,6 +322,22 @@ unchanged_plan() {  # <what>: the plan is byte-identical to $SB/before and nothi
   [ ! -e plans/PROJ-1.plan.prev.md ] && ok || nok ".prev written ($1)"
   [ ! -e plans/PROJ-1/changes.md ] && ok || nok "changes.md written ($1)"
 }
+
+t "check: an interrupted re-plan keeps changes.md; a .prev with another fingerprint drops it"
+ctx_sandbox; approved_plan
+edit_fx issue/PROJ-1/comment.json '.total = 6'
+edit_fx issue/PROJ-1/comment.startAt-3.json '.total = 6 | .comments += [{"id":"106","author":{"displayName":"Pat Product"},"body":"Please also cover the dark theme.","created":"2026-02-03T00:00:00.000+0000"}]'
+run "$JC" check plans/PROJ-1.plan.md; assert_eq "$CODE" "17" "exit"
+assert_contains "$(cat plans/PROJ-1/changes.md)" "Approved fingerprint: $(sed -n 's/^ticket_fingerprint: //p' plans/PROJ-1.plan.prev.md)" "changes.md names the fingerprint it compared against"
+run "$JC" fetch PROJ-1; assert_eq "$CODE" "0" "re-plan fetch"
+[ ! -e plans/PROJ-1.plan.md ] && ok || nok "plan still in place"
+assert_contains "$(cat plans/PROJ-1/changes.md)" $'## New comments (ids)\n- 106' "kept by the first fetch"
+cp plans/PROJ-1/changes.md "$SB/changes.kept"
+run "$JC" fetch PROJ-1; assert_eq "$CODE" "0" "fetch after the interrupted re-plan"
+cmp -s plans/PROJ-1/changes.md "$SB/changes.kept" && ok || nok "changes.md lost after an interrupted re-plan"
+sed "s/^ticket_fingerprint: .*/ticket_fingerprint: sha256:$(printf 'b%.0s' $(seq 1 64))/" plans/PROJ-1.plan.prev.md > plans/t && mv plans/t plans/PROJ-1.plan.prev.md
+run "$JC" fetch PROJ-1; assert_eq "$CODE" "0" "fetch after a newer manual replan"
+[ ! -e plans/PROJ-1/changes.md ] && ok || nok "an old changes.md was carried into a later replan"
 
 t "check: an unchanged ticket is FRESH (exit 0), the plan is byte-identical, and nothing but GETs is sent"
 ctx_sandbox; approved_plan; cp plans/PROJ-1.plan.md "$SB/before"

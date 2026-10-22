@@ -43,8 +43,9 @@
 # Re-stamping is a new approval and a new run, so it empties the log.
 #
 # Approval is a human act: "set status approved" is refused, and approving lives in its own
-# script, plan-approve.sh, which no command pre-approves (see there). This script has no approve. reset-executing restores approved for a plan whose header says executing and whose
-# approved part is unchanged. A real guarantee still needs a run record.
+# script, plan-approve.sh, which no command pre-approves (see there). This script has no approve.
+# reset-executing restores approved for a plan whose header says executing and whose approved part
+# is unchanged. A real guarantee still needs a run record.
 # "set <plan> status <v>" refuses (exit 2) unless the move is allowed:
 #   approved               never
 #   executing              only while check says RUNNABLE (approved + hash matches)
