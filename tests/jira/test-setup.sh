@@ -86,6 +86,22 @@ run "$SETUP" check
 assert_contains "$OUT" "FAIL  TARGET_BRANCH is empty"; assert_contains "$OUT" "TICKET_CHECK_MODE must be strict or warn"
 assert_eq "$CODE" "1" "exit"
 
+t "check: fails on a non-integer image cap and on an empty or blank marker"
+sandbox 'MAX_IMAGES=ten' 'MAX_IMAGE_MB=-1' 'PIPELINE_COMMENT_MARKER='; use_fixtures basic
+run "$SETUP" check
+assert_contains "$OUT" "FAIL  MAX_IMAGES must be a whole number (is 'ten')"
+assert_contains "$OUT" "FAIL  MAX_IMAGE_MB must be a whole number (is '-1')"
+assert_contains "$OUT" "FAIL  PIPELINE_COMMENT_MARKER must not be empty"
+assert_eq "$CODE" "1" "exit"
+sandbox 'PIPELINE_COMMENT_MARKER=   '; use_fixtures basic
+run "$SETUP" check
+assert_contains "$OUT" "FAIL  PIPELINE_COMMENT_MARKER must not be empty" "blank marker"
+sandbox 'MAX_IMAGES=0' 'MAX_IMAGE_MB=5'; use_fixtures basic
+run "$SETUP" check
+assert_not_contains "$OUT" "MAX_IMAGE" "0 is valid (downloads off)"
+assert_not_contains "$OUT" "PIPELINE_COMMENT_MARKER" "default marker passes"
+assert_eq "$CODE" "0" "exit"
+
 t "check: warns (never fails) when plans/ and prds/ are not git-ignored"
 sandbox; use_fixtures basic
 run "$SETUP" check

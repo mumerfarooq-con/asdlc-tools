@@ -7,6 +7,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 asdlc_init "$@"; set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
 asdlc_need_jira
+asdlc_need_marker
 KEY="${1:?usage: jira-notify.sh <KEY> [note]}"
 NOTE="${2:-Moved to Testing — please take a look.}"
 [ -n "$NOTIFY_ACCOUNT_IDS" ] || asdlc_die "set NOTIFY_ACCOUNT_IDS in $ASDLC_CONF_FILE (see jira-people.sh)"
@@ -21,9 +22,10 @@ while IFS= read -r id; do
   asdlc_http_ok "$code" || echo "warn: could not add watcher $id (HTTP $code)" >&2
 done <<<"$ids"
 
-# 2) post an ADF comment that @mentions them
+# 2) post an ADF comment that @mentions them; it starts with the marker so
+#    the pipeline can tell its own comments from people's
 mentions=$(printf '%s\n' "$ids" | jq -R '{type:"mention",attrs:{id:.}}' | jq -s '.')
-body=$(jq -n --arg note "$NOTE " --argjson mentions "$mentions" '
+body=$(jq -n --arg note "$PIPELINE_COMMENT_MARKER $NOTE " --argjson mentions "$mentions" '
   {body:{type:"doc",version:1,content:[
     {type:"paragraph",content:([{type:"text",text:$note}] + $mentions)}
   ]}}')

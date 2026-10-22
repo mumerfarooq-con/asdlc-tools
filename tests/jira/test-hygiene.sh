@@ -20,7 +20,7 @@ assert_eq "$hits" "" "hardcoded secrets"
 
 t "scripts are executable, use bash, and set strict mode"
 for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh; do
-  case "$f" in */lib.sh) continue ;; esac
+  case "$f" in */lib.sh|*/plan-lib.sh) continue ;; esac   # sourced libraries, never run
   [ -x "$f" ] && ok || nok "$(basename "$f") not executable"
   [ "$(head -n1 "$f")" = "#!/usr/bin/env bash" ] && ok || nok "$(basename "$f") shebang"
   grep -q '^set -euo pipefail' "$f" && ok || nok "$(basename "$f") lacks set -euo pipefail"
@@ -36,6 +36,7 @@ t "jira-run's pre-approved tools exclude plan approval, Bitbucket writes, commit
 fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/jira-run.md")"
 assert_not_contains "$fm" "plan-state.sh:*" "blanket plan-state"
 assert_not_contains "$fm" "plan-state.sh approve" "plan-state approve"
+assert_not_contains "$fm" "plan-approve" "plan-approve"
 assert_not_contains "$fm" "bb-open-pr.sh" "bb-open-pr"
 assert_not_contains "$fm" "bb-pr-comment.sh" "bb-pr-comment"
 assert_not_contains "$fm" "Bash(git:*)" "blanket git"
@@ -50,7 +51,7 @@ for g in $(printf '%s' "$fm" | grep -oE 'Bash\(git [a-z-]+' | sed 's/Bash(git //
   case "$g" in status|add) ok ;; *) nok "unexpected git grant: $g" ;; esac
 done
 
-# Plan approval (M2's plan-state.sh approve) and clearing another run's lock are human-only.
+# Plan approval (plan-approve.sh; plan-state.sh no longer has approve) and clearing another run's lock are human-only.
 # Permission rules match by prefix, so check every command, and check that no pre-approved
 # subcommand is a prefix of a human-only one ("unlock:*" must not cover "unlock-force" etc.).
 t "no command pre-approves plan approval or force-unlock, even by prefix"
@@ -59,10 +60,15 @@ for cmdfile in "$P"/commands/*.md; do
   fm="$(sed -n '/^---$/,/^---$/p' "$cmdfile")"
   assert_not_contains "$fm" "plan-state.sh:*" "$name: blanket plan-state"
   assert_not_contains "$fm" "plan-state.sh approve" "$name: plan-state approve"
+  assert_not_contains "$fm" "plan-approve" "$name: plan-approve.sh"
   assert_not_contains "$fm" "run-state.sh:*" "$name: blanket run-state"
   assert_not_contains "$fm" "run-state.sh force-unlock" "$name: force-unlock"
   assert_not_contains "$fm" "git commit" "$name: git commit"
   assert_not_contains "$fm" "git push" "$name: git push"
+  # a pre-approved "plan-approve.sh..." rule of any kind, or a bare scripts/ directory rule, would cover it
+  for rule in $(printf '%s' "$fm" | grep -oE 'Bash\([^)]*\)' | sed -E 's/^Bash\(//; s/\)$//; s/:?\*$//'); do
+    case '${CLAUDE_PLUGIN_ROOT}/scripts/plan-approve.sh' in "$rule"*) nok "$name: rule '$rule' covers plan-approve.sh" ;; *) ok ;; esac
+  done
   for pair in "plan-state.sh:approve" "run-state.sh:force-unlock"; do
     script="${pair%%:*}"; human="${pair#*:}"
     for sub in $(printf '%s' "$fm" | grep -oE "$script [a-z-]+:\\*" | sed -E "s/^$script ([a-z-]+):\\*$/\\1/"); do
@@ -70,6 +76,21 @@ for cmdfile in "$P"/commands/*.md; do
     done
   done
 done
+
+t "plan.md calls plan-approve.sh for approve, in an unapproved line, and nothing else approves"
+pl="$(cat "$P/commands/plan.md")"
+fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/plan.md")"
+assert_contains "$pl" '${CLAUDE_PLUGIN_ROOT}/scripts/plan-approve.sh <ID>' "approve step uses plan-approve.sh"
+assert_not_contains "$pl" "plan-state.sh approve" "no plan-state approve left in plan.md"
+assert_not_contains "$fm" "plan-approve" "plan.md does not pre-approve it"
+assert_contains "$fm" "plan-state.sh validate:*" "plan.md pre-approves only validate and replan"
+assert_contains "$fm" "plan-state.sh replan:*" "replan"
+t "the only script that can approve is plan-approve.sh: no other script re-writes plan_hash"
+for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh; do
+  case "$f" in */plan-approve.sh) continue ;; esac
+  if grep -qE "write_field +plan_hash" "$f"; then nok "$(basename "$f") can approve"; else ok; fi
+done
+assert_eq "$(grep -c 'write_field plan_hash' "$P/scripts/plan-approve.sh")" "1" "plan-approve.sh is where the hash is re-written"
 
 t "/asdlc:plan is human-invoked only; planning and execute commands pre-approve the new scripts"
 fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/plan.md")"
@@ -89,8 +110,8 @@ assert_contains "$(cat "$P/commands/implement-prd.md")" "plans/<ID>/plan-templat
 
 t "the plan template has every heading validate requires, no header and no progress line"
 tpl="$P/templates/plan.md"
-req="$(sed -n "s/^REQUIRED_SECTIONS='\(.*\)'\$/\1/p" "$P/scripts/plan-state.sh")"
-assert_contains "$req" "Goal" "REQUIRED_SECTIONS readable from plan-state.sh"
+req="$(sed -n "s/^REQUIRED_SECTIONS='\(.*\)'\$/\1/p" "$P/scripts/plan-lib.sh")"
+assert_contains "$req" "Goal" "REQUIRED_SECTIONS readable from plan-lib.sh"
 for h in $(printf '%s' "$req" | tr ' ' '_' | tr '|' ' '); do
   h="$(printf '%s' "$h" | tr '_' ' ')"
   if grep -qixF "## $h" "$tpl"; then ok; else nok "template lacks a '## $h' heading"; fi
@@ -126,5 +147,32 @@ assert_contains "$(cat "$P/commands/implement-prd.md")" "TEST PASS" "implement-p
 fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/jira-run.md")"
 assert_not_contains "$fm" "run-state.sh list" "jira-run pre-approves run-state list"
 assert_not_contains "$fm" "run-state.sh status" "jira-run pre-approves run-state status"
+
+t "jira-run runs the stale check before start-branch, pre-approves jira-context.sh, and re-plans STALE plans"
+jr="$(cat "$P/commands/jira-run.md")"
+fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/jira-run.md")"
+assert_contains "$fm" "jira/scripts/jira-context.sh:*" "jira-run pre-approves jira-context.sh"
+assert_not_contains "$fm" "ticket-to-prd" "jira-run no longer pre-approves ticket-to-prd.sh"
+assert_not_contains "$jr" "ticket-to-prd" "jira-run body no longer calls ticket-to-prd.sh"
+chk="$(grep -n 'jira-context.sh check' "$P/commands/jira-run.md" | head -n1 | cut -d: -f1)"
+sb="$(grep -n 'run-state.sh start-branch <plan>' "$P/commands/jira-run.md" | head -n1 | cut -d: -f1)"
+[ -n "$chk" ] && [ -n "$sb" ] && [ "$chk" -lt "$sb" ] && ok || nok "jira-context.sh check (line '$chk') must come before start-branch (line '$sb')"
+phb="$(sed -n '/^## Phase B/,/^## Standing/p' "$P/commands/jira-run.md")"
+assert_contains "$phb" "STALE" "Phase B names STALE plans"
+assert_contains "$phb" "jira-context.sh fetch" "Phase B fetches the context bundle"
+assert_contains "$phb" "context.md" "Phase B plans from context.md"
+assert_contains "$jr" "RUNNABLE, VALID and FRESH" "Phase A needs FRESH"
+assert_contains "$jr" "or in the next planning run under \`--execute-only\`" "Phase A STALE line says when --execute-only re-plans"
+assert_contains "$(cat "$P/commands/implement-prd.md")" "ticket_fingerprint" "implement-prd warns on a fingerprinted plan (D10)"
+assert_contains "$(cat "$P/commands/implement-prd.md")" "changes.md" "implement-prd passes changes.md on a re-plan"
+
+t "the plan template, planner and critic know the ticket bundle and what changed"
+tp="$(cat "$P/templates/plan.md")"
+for b in "Ticket sections:" "Comments followed:" "Parent and linked tickets:" "Images:" "Access rules and traps:" "Changed since the previous plan:"; do
+  assert_contains "$tp" "$b" "template Context used has '$b'"
+done
+assert_contains "$(cat "$P/agents/prd-planner.md")" "context.md" "planner mentions context.md"
+assert_contains "$(cat "$P/agents/prd-planner.md")" "changes.md" "planner mentions changes.md"
+assert_contains "$(cat "$P/agents/plan-critic.md")" "changes.md" "critic checks changes.md"
 
 finish

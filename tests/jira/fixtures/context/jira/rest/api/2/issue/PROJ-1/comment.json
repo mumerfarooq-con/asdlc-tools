@@ -1,0 +1,5 @@
+{"startAt": 0, "maxResults": 3, "total": 5, "comments": [
+  {"id": "105", "author": {"displayName": "Dana Dev"}, "created": "2026-01-05T09:00:00.000+0000", "body": "Newest human comment."},
+  {"id": "104", "author": {"displayName": "Bot"}, "created": "2026-01-04T09:00:00.000+0000", "body": "\\[asdlc\\] Escaped pipeline note"},
+  {"id": "103", "author": {"displayName": "Sam Support"}, "created": "2026-01-03T09:00:00.000+0000", "body": "Middle comment with ```` four ticks"}
+]}

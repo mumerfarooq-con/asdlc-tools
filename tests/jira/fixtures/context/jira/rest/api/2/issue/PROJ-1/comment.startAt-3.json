@@ -1,0 +1,4 @@
+{"startAt": 3, "maxResults": 3, "total": 5, "comments": [
+  {"id": "102", "author": {"displayName": "Bot"}, "created": "2026-01-02T09:00:00.000+0000", "body": "  [asdlc] Plain pipeline note"},
+  {"id": "101", "author": {"displayName": "Pat Product"}, "created": "2026-01-01T09:00:00.000+0000", "body": "Oldest comment."}
+]}

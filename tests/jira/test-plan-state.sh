@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # plan-state.sh: header block, hash binding, states, transitions, injection, legacy markers.
 . "$(dirname "$0")/helpers.sh"
-PS="$SHARED/plan-state.sh"
+PS="$SHARED/plan-state.sh"; PA="$SHARED/plan-approve.sh"
 
 body() { printf '# PROJ-1: plan\n\n## Changes\n1. do it\n'; }
 bodyhash() { body | shasum -a 256 | awk '{print $1}'; }
@@ -580,14 +580,14 @@ assert_eq "$OUT/$CODE" "VALID/0" "note, empty response"
 t "approve: answering the open questions, then approving, recomputes the hash and makes the plan RUNNABLE"
 vplan A '- [ ] Which format?'; "$PS" stamp plans/A.plan.md >/dev/null; P=plans/A.plan.md
 old="$("$PS" get "$P" plan_hash)"
-cp "$P" "$SB/orig"; run "$PS" approve A
+cp "$P" "$SB/orig"; run "$PA" A
 assert_eq "$CODE" "20" "refused while a question is open"; assert_contains "$OUT" "INVALID" "says INVALID"
 assert_contains "$ERR" "Open questions: unanswered" "names the question"
 assert_same "$P" "$SB/orig" "invalid plan after refused approve"
 sed 's/^- \[ \] Which format?/- [x] Which format? -> Answer: CSV/' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
 log_progress "$P" "- Task 1: EXECUTOR DONE — earlier note"
 progress_before="$(sed -n '/^<!-- asdlc:progress -->/,$p' "$P")"
-run "$PS" approve A
+run "$PA" A
 assert_eq "$CODE" "0" "exit"; assert_contains "$OUT" "approved A (sha256:" "message"
 assert_status "$P" approved
 [ "$("$PS" get "$P" plan_hash)" != "$old" ] && ok || nok "hash not recomputed"
@@ -598,33 +598,112 @@ t "approve: an approved plan edited by a human is re-approved with a new hash"
 h1="$("$PS" get "$P" plan_hash)"
 edit_approved "$P" "- an extra risk the human added"
 run "$PS" check "$P"; assert_eq "$OUT" "EDITED" "edited"
-run "$PS" approve A; assert_eq "$CODE" "0" "re-approve exit"
+run "$PA" A; assert_eq "$CODE" "0" "re-approve exit"
 run "$PS" check "$P"; assert_eq "$OUT" "RUNNABLE" "runnable again"
 [ "$("$PS" get "$P" plan_hash)" != "$h1" ] && ok || nok "hash unchanged after human edit"
 
-t "approve: allowed from stale, needs-info, blocked; refused from RUNNABLE, executing, done, failed, skip"
-for s in stale needs-info blocked; do
+t "approve: allowed from needs-info, blocked; refused from stale (D9), RUNNABLE, executing, done, failed, skip"
+for s in needs-info blocked; do
   vplan A; "$PS" stamp "$P" >/dev/null; human_status "$P" "$s"
-  run "$PS" approve A; assert_eq "$CODE" "0" "from $s"
+  run "$PA" A; assert_eq "$CODE" "0" "from $s"
   run "$PS" check "$P"; assert_eq "$OUT" "RUNNABLE" "runnable after $s"
 done
-for s in approved executing done failed skip; do
+for s in stale approved executing done failed skip; do
   vplan A; "$PS" stamp "$P" >/dev/null
-  if [ "$s" = approved ]; then "$PS" approve A >/dev/null; else human_status "$P" "$s"; fi
-  cp "$P" "$SB/orig"; run "$PS" approve A
+  if [ "$s" = approved ]; then "$PA" A >/dev/null; else human_status "$P" "$s"; fi
+  cp "$P" "$SB/orig"; run "$PA" A
   assert_eq "$CODE" "2" "approve from $s"; assert_same "$P" "$SB/orig" "plan after refused approve from $s"
 done
+vplan A; "$PS" stamp "$P" >/dev/null; human_status "$P" stale; cp "$P" "$SB/orig"; run "$PA" A
+assert_contains "$ERR" "STALE" "says STALE"; assert_contains "$ERR" "re-plan" "says to re-plan"
+assert_same "$P" "$SB/orig" "stale plan after refused approve"
+
+t "approve: there is no plan-state.sh approve (the approve path is plan-approve.sh only)"
+vplan A; "$PS" stamp "$P" >/dev/null; cp "$P" "$SB/orig"
+run "$PS" approve A; assert_eq "$CODE" "2" "exit"; assert_contains "$ERR" "unknown command" "message"
+assert_same "$P" "$SB/orig" "plan"
+run "$PA"; assert_eq "$CODE" "2" "no argument is a usage error"
+run "$PA" 'a;b'; assert_eq "$CODE" "2" "bad bare id"
+run "$PA" plans/nope.plan.md; assert_eq "$CODE" "2" "missing plan"
 
 t "approve: a duplicated header field or progress line is not re-approvable"
-vplan A; "$PS" stamp "$P" >/dev/null; "$PS" approve A >/dev/null
+vplan A; "$PS" stamp "$P" >/dev/null; "$PA" A >/dev/null
 awk '/^status:/ && !d {print "status: approved"; d=1} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
-cp "$P" "$SB/orig"; run "$PS" approve A; assert_eq "$CODE" "2" "duplicate header"; assert_same "$P" "$SB/orig" "plan"
-vplan A; "$PS" stamp "$P" >/dev/null; "$PS" approve A >/dev/null; edit_approved "$P" "$PROGRESS"
-cp "$P" "$SB/orig"; run "$PS" approve A; assert_eq "$CODE" "2" "duplicate progress line"; assert_same "$P" "$SB/orig" "plan"
+cp "$P" "$SB/orig"; run "$PA" A; assert_eq "$CODE" "2" "duplicate header"; assert_same "$P" "$SB/orig" "plan"
+vplan A; "$PS" stamp "$P" >/dev/null; "$PA" A >/dev/null; edit_approved "$P" "$PROGRESS"
+cp "$P" "$SB/orig"; run "$PA" A; assert_eq "$CODE" "2" "duplicate progress line"; assert_same "$P" "$SB/orig" "plan"
 
 t "approve: no header block -> 16, nothing written"
-vplan A; cp "$P" "$SB/orig"; run "$PS" approve A
+vplan A; cp "$P" "$SB/orig"; run "$PA" A
 assert_eq "$CODE" "16" "exit"; assert_same "$P" "$SB/orig" "plan"
+
+# ---- ticket fingerprint -----------------------------------------------------------------------
+FP="sha256:$(printf 'x' | shasum -a 256 | awk '{print $1}')"; FP2="sha256:$(printf 'y' | shasum -a 256 | awk '{print $1}')"
+fpfile() {  # <key> [hash] [at] [source]: what jira-context.sh build writes
+  mkdir -p "plans/$1"
+  printf 'ticket_fingerprint: %s\nfingerprint_at: %s\nfingerprint_source: %s\n' "${2:-$FP}" "${3:-2026-01-02T03:04:05Z}" "${4:-rest}" > "plans/$1/fingerprint"
+}
+
+t "stamp copies the fingerprint file into the header, after plan_hash and outside the hash"
+mk F; fpfile F; P=plans/F.plan.md; "$PS" stamp "$P" >/dev/null
+assert_eq "$("$PS" get "$P" ticket_fingerprint)" "$FP" "fingerprint"
+assert_eq "$("$PS" get "$P" fingerprint_at)" "2026-01-02T03:04:05Z" "at"
+assert_eq "$("$PS" get "$P" fingerprint_source)" "rest" "source"
+assert_eq "$(sed -n '1,/^-->/p' "$P" | sed -n '5,8p' | cut -d: -f1 | tr '\n' ' ')" "ticket_fingerprint fingerprint_at fingerprint_source branch " "order"
+assert_eq "$("$PS" get "$P" plan_hash)" "sha256:$(approvedhash)" "hash unchanged by the fields"
+"$PA" F >/dev/null 2>&1 || true
+run "$PS" check "$P"; assert_eq "$OUT" "PENDING" "pending"
+mk F; fpfile F "$FP" 2026-01-02T03:04:05Z mcp; "$PS" stamp "$P" >/dev/null
+assert_eq "$("$PS" get "$P" fingerprint_source)" "mcp" "mcp source accepted"
+
+t "stamp without a fingerprint file writes none of the three fields; a re-stamp picks up or drops it"
+mk F2; P=plans/F2.plan.md
+assert_eq "$(grep -c 'fingerprint' "$P")" "0" "no fields"
+fpfile F2; "$PS" stamp "$P" >/dev/null; assert_eq "$("$PS" get "$P" ticket_fingerprint)" "$FP" "picked up"
+fpfile F2 "$FP2"; "$PS" stamp "$P" >/dev/null; assert_eq "$("$PS" get "$P" ticket_fingerprint)" "$FP2" "new value on re-stamp"
+rm plans/F2/fingerprint; "$PS" stamp "$P" >/dev/null; assert_eq "$(grep -c 'fingerprint' "$P")" "0" "dropped when the file is gone"
+
+t "stamp with a malformed fingerprint file: exit 2, nothing written"
+mk F3; P=plans/F3.plan.md; cp "$P" "$SB/orig"
+bad() {  # <label> <printf format> [args]: write the file, then stamp (no pipe: counters must stay in this shell)
+  local label="$1"; shift; printf "$@" > plans/F3/fingerprint; run "$PS" stamp "$P"
+  assert_eq "$CODE" "2" "$label"; assert_same "$P" "$SB/orig" "plan after $label"
+}
+mkdir -p plans/F3
+bad "short hash" 'ticket_fingerprint: sha256:abc\nfingerprint_at: 2026-01-02T03:04:05Z\nfingerprint_source: rest\n'
+bad "bad time" 'ticket_fingerprint: %s\nfingerprint_at: yesterday\nfingerprint_source: rest\n' "$FP"
+bad "bad source" 'ticket_fingerprint: %s\nfingerprint_at: 2026-01-02T03:04:05Z\nfingerprint_source: soap\n' "$FP"
+bad "missing line" 'ticket_fingerprint: %s\nfingerprint_at: 2026-01-02T03:04:05Z\n' "$FP"
+bad "duplicate line" 'ticket_fingerprint: %s\nticket_fingerprint: %s\nfingerprint_at: 2026-01-02T03:04:05Z\nfingerprint_source: rest\n' "$FP" "$FP"
+bad "extra line" 'ticket_fingerprint: %s\nfingerprint_at: 2026-01-02T03:04:05Z\nfingerprint_source: rest\nstatus: approved\n' "$FP"
+bad "CR" 'ticket_fingerprint: %s\r\nfingerprint_at: 2026-01-02T03:04:05Z\nfingerprint_source: rest\n' "$FP"
+bad "long hash" 'ticket_fingerprint: %sX\nfingerprint_at: 2026-01-02T03:04:05Z\nfingerprint_source: rest\n' "$FP"
+bad "empty file" ""
+
+t "set refuses the three fingerprint fields; a duplicated field line makes check say EDITED"
+mk F4; fpfile F4; P=plans/F4.plan.md; "$PS" stamp "$P" >/dev/null; cp "$P" "$SB/orig"
+for f in ticket_fingerprint fingerprint_at fingerprint_source; do
+  run "$PS" set "$P" "$f" "$FP2"; assert_eq "$CODE" "2" "set $f"; assert_same "$P" "$SB/orig" "plan after refused set $f"
+done
+for f in ticket_fingerprint fingerprint_at fingerprint_source; do
+  cp "$SB/orig" "$P"; "$PS" stamp "$P" >/dev/null
+  awk -v f="$f:" '$1==f && !d {print; print; d=1; next} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
+  run "$PS" check "$P"; assert_eq "$OUT/$CODE" "EDITED/11" "duplicate $f"
+  assert_contains "$ERR" "duplicate header field" "message for $f"
+done
+
+t "approve leaves the fingerprint fields unchanged"
+vplan F5; P=plans/F5.plan.md; fpfile F5; "$PS" stamp "$P" >/dev/null
+for f in ticket_fingerprint fingerprint_at fingerprint_source; do eval "b_$f=\$(\"\$PS\" get \"\$P\" \$f)"; done
+run "$PA" F5; assert_eq "$CODE" "0" "approve exit"
+assert_eq "$("$PS" get "$P" ticket_fingerprint)" "$b_ticket_fingerprint" "fingerprint"
+assert_eq "$("$PS" get "$P" fingerprint_at)" "$b_fingerprint_at" "at"
+assert_eq "$("$PS" get "$P" fingerprint_source)" "$b_fingerprint_source" "source"
+run "$PS" check "$P"; assert_eq "$OUT" "RUNNABLE" "runnable with the fields"
+edit_approved "$P" "- human edit"; run "$PA" F5; assert_eq "$CODE" "0" "re-approve after an edit"
+assert_eq "$("$PS" get "$P" ticket_fingerprint)" "$FP" "fingerprint after re-approve"
+awk '$1=="fingerprint_at:" && !d {print; print; d=1; next} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"; cp "$P" "$SB/orig"
+run "$PA" F5; assert_eq "$CODE" "2" "a duplicated fingerprint field is not re-approvable"; assert_same "$P" "$SB/orig" "plan"
 
 # ---- replan ---------------------------------------------------------------------------------
 
@@ -635,7 +714,7 @@ run "$PS" replan R
 assert_eq "$CODE" "0" "exit"; assert_contains "$OUT" "re-plan" "message"; assert_contains "$OUT" "plans/R.plan.prev.md" "names .prev"
 if [ ! -e plans/R.plan.md ]; then ok; else nok "plan still in place"; fi
 assert_same plans/R.plan.prev.md "$SB/orig" "moved byte-identical"
-vplan R; "$PS" stamp plans/R.plan.md >/dev/null; "$PS" approve R >/dev/null; "$PS" set R status executing >/dev/null
+vplan R; "$PS" stamp plans/R.plan.md >/dev/null; "$PA" R >/dev/null; "$PS" set R status executing >/dev/null
 cp plans/R.plan.md "$SB/orig"; run "$PS" replan R
 assert_eq "$CODE" "2" "refused while executing"; assert_same plans/R.plan.md "$SB/orig" "plan after refused replan"
 run "$PS" replan plans/nope.plan.md; assert_eq "$CODE" "2" "missing plan"

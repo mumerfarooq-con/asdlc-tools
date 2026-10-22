@@ -1,0 +1,22 @@
+{
+  "key": "PROJ-1",
+  "fields": {
+    "summary": "Course page shows wrong badge",
+    "issuetype": {"name": "Bug"},
+    "status": {"name": "To Do"},
+    "description": "h2. What is wrong\nThe badge says Enrolled for guests.\n\n{code}\n```\nfence inside\n```\n{code}\nDesign: [mockup|https://www.figma.com/file/AbC123/badge?node-id=1] and https://example.org/other",
+    "parent": {"key": "PROJ-0", "fields": {"summary": "Badge epic"}},
+    "issuelinks": [
+      {"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+       "inwardIssue": {"key": "PROJ-5", "fields": {"summary": "Fix the | pipe", "status": {"name": "In Progress"}}}},
+      {"type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+       "outwardIssue": {"key": "PROJ-6", "fields": {"summary": "Related thing", "status": {"name": "Done"}}}}
+    ],
+    "attachment": [
+      {"id": "10001", "filename": "badge screenshot.png", "mimeType": "image/png", "size": 10, "created": "2026-01-05T10:00:00.000+0000"},
+      {"id": "10002", "filename": "huge.png", "mimeType": "image/png", "size": 9999999, "created": "2026-01-04T10:00:00.000+0000"},
+      {"id": "10003", "filename": "logo.svg", "mimeType": "image/svg+xml", "size": 100, "created": "2026-01-03T10:00:00.000+0000"},
+      {"id": "10004", "filename": "..fake.png", "mimeType": "image/png", "size": 100, "created": "2026-01-02T10:00:00.000+0000"}
+    ]
+  }
+}
