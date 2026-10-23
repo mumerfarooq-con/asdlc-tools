@@ -8,6 +8,7 @@ MARKER='<!-- asdlc'
 # drop that alternation once those plans are retired.
 MARKER_RE='^<!-- (asdlc|jira-run:approval)[ \t]*$'
 PROGRESS='<!-- asdlc:progress -->'
+. "$(dirname "${BASH_SOURCE[0]}")/fp-sources.sh"   # FP_SOURCES, fp_source_ok
 
 die() { echo "$2" >&2; exit "$1"; }
 
@@ -119,7 +120,7 @@ read_fingerprint() {  # <file>
     case "$k" in
       ticket_fingerprint) [ -z "$fp" ] || return 1; re_ok "$v" '^sha256:[0-9a-f]{64}$' || return 1; fp="$v" ;;
       fingerprint_at) [ -z "$at" ] || return 1; re_ok "$v" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' || return 1; at="$v" ;;
-      fingerprint_source) [ -z "$src" ] || return 1; case "$v" in rest|mcp) src="$v" ;; *) return 1 ;; esac ;;
+      fingerprint_source) [ -z "$src" ] || return 1; fp_source_ok "$v" || return 1; src="$v" ;;
       *) return 1 ;;
     esac
   done < "$1"

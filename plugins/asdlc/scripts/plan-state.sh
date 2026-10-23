@@ -124,7 +124,7 @@ case "$cmd" in
       *.plan.md)
         fpf="${plan%.plan.md}/fingerprint"
         if [ -f "$fpf" ]; then
-          fp_lines="$(read_fingerprint "$fpf")" || die 2 "refusing: $fpf is malformed (want ticket_fingerprint: sha256:<64 hex>, fingerprint_at: <ISO UTC>, fingerprint_source: rest|mcp); nothing written"
+          fp_lines="$(read_fingerprint "$fpf")" || die 2 "refusing: $fpf is malformed (want ticket_fingerprint: sha256:<64 hex>, fingerprint_at: <ISO UTC>, fingerprint_source: ${FP_SOURCES// /|}); nothing written"
         fi ;;
     esac
     h="$(hash_body 1 < "$btmp")"

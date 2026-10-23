@@ -13,7 +13,8 @@ unset JIRA_EMAIL JIRA_TOKEN BITBUCKET_TOKEN BITBUCKET_EMAIL JIRA_URL JIRA_PROJEC
       JIRA_TODO_STATUS JIRA_TESTING_STATUS JIRA_NOTIFY_ACCOUNTIDS JIRA_BOARD_ID \
       BITBUCKET_WORKSPACE BITBUCKET_REPO BITBUCKET_DEST_BRANCH \
       REVIEW_COUNCIL_FILES REVIEW_COUNCIL_LINES REVIEW_COUNCIL_PATHS \
-      ASDLC_JIRA_CONF ASDLC_FIXTURES ASDLC_FIXTURE_LOG ASDLC_JIRA_ALLOWED_HOSTS \
+      ASDLC_JIRA_CONF ASDLC_FIXTURES ASDLC_FIXTURE_LOG ASDLC_JIRA_ALLOWED_HOSTS ASDLC_TEST_FIXTURE_CHECK \
+      JIRA_TRANSPORT BB_TRANSPORT ASDLC_BB_MCP_SERVER ASDLC_BB_MCP_PROFILE ASDLC_ALLOW_TEST_BB_PROFILE \
       FAKECURL_LOG FAKECURL_BODY FAKECURL_CODE FAKECURL_EXIT
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com \
        GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
@@ -55,6 +56,10 @@ sandbox() {
     local line; for line in "$@"; do echo "$line"; done
   } > .asdlc/jira.conf
 }
+
+# Set a config key in the sandbox's config (the last line of a key wins). Config keys come from
+# the file only: the environment never overrides them.
+conf_set() { echo "$1=$2" >> "$SB/.asdlc/jira.conf"; }
 
 # Copy a fixture set into the sandbox so a test can add or change responses,
 # and point the scripts at it with a fresh request log.
