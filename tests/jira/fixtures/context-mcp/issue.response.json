@@ -1,0 +1,40 @@
+{
+  "issues": {
+    "nodes": [
+      {
+        "key": "PROJ-1",
+        "fields": {
+          "attachment": [
+            {"id": "10001", "filename": "badge screenshot.png", "mimeType": "image/png", "size": 10, "created": "2026-01-05T10:00:00.000+0000"},
+            {"id": "10003", "filename": "logo.svg", "mimeType": "image/svg+xml", "size": 100, "created": "2026-01-03T10:00:00.000+0000"}
+          ],
+          "comment": {
+            "comments": [
+              {"id": "105", "author": {"displayName": "Dana Dev"}, "created": "2026-01-05T09:00:00.000+0000",
+               "body": "Newest human comment: <custom data-type=\"mention\" data-id=\"id-1\">@Pat Product</custom> please confirm the copy."},
+              {"id": "104", "author": {"displayName": "Pipeline"}, "created": "2026-01-04T09:00:00.000+0000",
+               "body": "[asdlc] Plain pipeline note"},
+              {"id": "101", "author": {"displayName": "Pat Product"}, "created": "2026-01-01T09:00:00.000+0000",
+               "body": "First comment, see <custom data-type=\"smartlink\" data-url=\"https://www.figma.com/file/XyZ789/other\">Figma</custom>"}
+            ],
+            "total": 3,
+            "maxResults": 100,
+            "startAt": 0
+          },
+          "description": "## What is wrong\nThe badge says Enrolled for guests.\n\n<custom data-type=\"mention\" data-id=\"id-0\">@Dana Dev</custom> owns it. Design: <custom data-type=\"smartlink\" data-url=\"https://www.figma.com/file/AbC123/badge?node-id=1\">mockup</custom>\n\n![](blob:7c1d2f0a-0000-4000-8000-000000000001)\n\n```\nfence inside\n```",
+          "issuelinks": [
+            {"type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+             "inwardIssue": {"key": "PROJ-5", "fields": {"summary": "Fix the | pipe", "status": {"name": "In Progress"}}}},
+            {"type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+             "outwardIssue": {"key": "PROJ-6", "fields": {"summary": "Related thing", "status": {"name": "Done"}}}}
+          ],
+          "issuetype": {"name": "Bug"},
+          "parent": {"key": "PROJ-0", "fields": {"summary": "Badge epic"}},
+          "status": {"name": "To Do"},
+          "summary": "Course page shows wrong badge"
+        }
+      }
+    ]
+  },
+  "context": {"cloudId": "per-call-id-1", "requestId": "r-1"}
+}

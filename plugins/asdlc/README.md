@@ -18,7 +18,8 @@ ASDLC is built for Claude Code: the terminal, an IDE, or the desktop app's Code 
 ## Data
 
 - Plans, reviews and reports are written to your repository (`plans/`, `prds/`).
-- The Jira workflow calls your Jira Cloud and Bitbucket Cloud APIs with tokens from your shell environment. The Jira token is sent only to your configured Jira URL.
+- The Jira workflow reads and writes Jira through the Atlassian MCP connector when it is connected, else through the Jira Cloud API with a token from your shell environment. Bitbucket Cloud is called through its API with a token (a Bitbucket MCP server is an opt-in alternative). The Jira token, when used, is sent only to your configured Jira URL.
+- Over MCP, a plugin hook captures the response of the Jira (and, if enabled, Bitbucket) tool call into `plans/` and shows the model only a receipt, so ticket text does not enter the orchestrating model's context. The hook does nothing unless a script has opened a request, and it never receives other MCP servers' calls.
 - Planning a Jira ticket downloads its description, comments, parent ticket and linked tickets' titles, and its raster image attachments (png, jpeg, gif, webp, within size caps), into `plans/<KEY>/`. Keep `plans/` out of git; `jira-setup` warns if it isn't ignored.
 - `/asdlc:review-pr` reads PRs through the `gh` CLI or your Bitbucket MCP server.
 - The plugin sends nothing anywhere else.

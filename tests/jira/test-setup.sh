@@ -123,9 +123,61 @@ assert_eq "$CODE" "0" "exit with old .gitignore"
 assert_contains "$OUT" "warn  not git-ignored: plans/x/impact.md plans/x.plan.prev.md —" "only the new two"
 assert_not_contains "$OUT" "not git-ignored: plans/.jira-run.lock" "old three ignored"
 
-t "check: token env vars required outside fixture mode"
-sandbox
+t "check: token env vars required outside fixture mode (JIRA_TRANSPORT=rest)"
+sandbox 'JIRA_TRANSPORT=rest'
 run "$SETUP" check
 assert_contains "$OUT" "FAIL  env JIRA_TOKEN is not set"; assert_eq "$CODE" "1" "exit"
+assert_not_contains "$OUT" "warn  no Jira login" "rest is not the mcp path"
+
+t "check: JIRA_TRANSPORT and BB_TRANSPORT are validated"
+sandbox 'JIRA_TRANSPORT=sometimes' 'BB_TRANSPORT=carrier-pigeon'; use_fixtures basic
+run "$SETUP" check
+assert_contains "$OUT" "FAIL  JIRA_TRANSPORT must be auto, mcp or rest (is 'sometimes')"
+assert_contains "$OUT" "FAIL  BB_TRANSPORT must be rest or mcp (is 'carrier-pigeon')"
+assert_eq "$CODE" "1" "exit"
+assert_eq "$(requests | jq length)" "0" "nothing was sent"
+sandbox; run "$S/jira-conf.sh" JIRA_TRANSPORT; assert_eq "$OUT" "auto" "default JIRA_TRANSPORT"
+run "$S/jira-conf.sh" BB_TRANSPORT; assert_eq "$OUT" "rest" "default BB_TRANSPORT"
+sandbox 'JIRA_TRANSPORT=mcp'; JIRA_TRANSPORT=rest run "$S/jira-conf.sh" JIRA_TRANSPORT; assert_eq "$OUT" "mcp" "the environment does not override the config"
+
+t "check: JIRA_TRANSPORT=mcp skips the Jira calls and warns what is lost, even with a token"
+sandbox 'JIRA_TRANSPORT=mcp' 'BB_TRANSPORT=mcp'; use_fixtures basic
+ASDLC_BB_MCP_SERVER=test ASDLC_ALLOW_TEST_BB_PROFILE=1 JIRA_EMAIL=a@example.com JIRA_TOKEN=s3cr3t-value run env -u ASDLC_FIXTURES "$SETUP" check
+assert_contains "$OUT" "warn  JIRA_TRANSPORT=mcp: the Jira token checks and REST test calls are skipped"
+for w in images watchers sprints "status-name check" "REST fallback for truncated comment threads"; do
+  assert_contains "$OUT" "$w" "lost: $w"
+done
+assert_not_contains "$OUT" "Jira: signed in" "no Jira call"
+assert_not_contains "$OUT" "s3cr3t-value" "token value"
+assert_eq "$CODE" "0" "warnings alone exit 0"
+sandbox 'JIRA_TRANSPORT=mcp'; use_fixtures basic
+run "$SETUP" check
+assert_contains "$OUT" "warn  JIRA_TRANSPORT=mcp: the Jira token checks"
+assert_eq "$(requests | jq '[.[] | select(.path | test("/rest/api/"))] | length')" "0" "no Jira request under mcp"
+assert_contains "$OUT" "Bitbucket: acme/widgets" "Bitbucket REST unchanged"
+
+t "check: auto without a Jira login takes the mcp path; auto with a login keeps the REST checks"
+sandbox 'BB_TRANSPORT=mcp'
+ASDLC_BB_MCP_SERVER=test ASDLC_ALLOW_TEST_BB_PROFILE=1 run env -u JIRA_EMAIL -u JIRA_TOKEN "$SETUP" check
+assert_contains "$OUT" "warn  no Jira login (JIRA_EMAIL/JIRA_TOKEN) with JIRA_TRANSPORT=auto" "warns"
+assert_not_contains "$OUT" "FAIL" "no failure"; assert_eq "$CODE" "0" "exit"
+sandbox 'STATUS_DEFAULT=To Do,Idea' 'JIRA_PROJECT_NAME=Widgets'; use_fixtures basic
+run "$SETUP" check
+assert_contains "$OUT" "Jira: signed in as Test User" "a login (fixture) keeps the REST path"
+assert_not_contains "$OUT" "you lose" "no loss warning"
+
+t "check: BB_TRANSPORT=mcp needs a server and a real profile; the test profile is refused; no REST call"
+sandbox 'BB_TRANSPORT=mcp'; use_fixtures basic
+run env -u ASDLC_BB_MCP_SERVER "$SETUP" check
+assert_contains "$OUT" "FAIL  BB_TRANSPORT=mcp needs ASDLC_BB_MCP_SERVER"; assert_eq "$CODE" "1" "no server"
+run env ASDLC_BB_MCP_SERVER=nosuchserver "$SETUP" check
+assert_contains "$OUT" "no Bitbucket MCP profile 'nosuchserver'"; assert_contains "$OUT" "use BB_TRANSPORT=rest" "advice"; assert_eq "$CODE" "1" "no profile"
+run env ASDLC_BB_MCP_SERVER=test "$SETUP" check
+assert_contains "$OUT" "is for tests only"; assert_eq "$CODE" "1" "test profile refused"
+run env ASDLC_BB_MCP_SERVER=anyserver ASDLC_BB_MCP_PROFILE=test ASDLC_ALLOW_TEST_BB_PROFILE=1 "$SETUP" check
+assert_contains "$OUT" "ok    BB_TRANSPORT=mcp: server anyserver, profile test"; assert_eq "$CODE" "0" "exit"
+assert_not_contains "$OUT" "Bitbucket: acme" "no Bitbucket REST call"
+assert_not_contains "$OUT" "BITBUCKET_TOKEN" "no Bitbucket token check"
+assert_eq "$(requests | jq '[.[] | select(.path | test("/repositories/"))] | length')" "0" "no Bitbucket request"
 
 finish

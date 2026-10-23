@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__.+__(addCommentToJiraIssue|editJiraIssue)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-capture.sh\" guard",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__.+__(getJiraIssue|searchJiraIssuesUsingJql|getTransitionsForJiraIssue|transitionJiraIssue|addCommentToJiraIssue)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-capture.sh\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "^mcp__(([A-Za-z0-9-]|_[A-Za-z0-9-])*_?)?[Bb][Ii][Tt][Bb][Uu][Cc][Kk][Ee][Tt]([A-Za-z0-9-]|_[A-Za-z0-9-])*__.+$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-capture.sh\" bb",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

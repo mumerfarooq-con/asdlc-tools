@@ -19,13 +19,47 @@ hits="$(grep -rnIE '(TOKEN|SECRET|PASSWORD)=[A-Za-z0-9_-]{8,}' "$P/jira" "$P/scr
 assert_eq "$hits" "" "hardcoded secrets"
 
 t "scripts are executable, use bash, and set strict mode"
-for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh; do
-  case "$f" in */lib.sh|*/plan-lib.sh) continue ;; esac   # sourced libraries, never run
+for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh "$P"/hooks/*.sh; do
+  case "$f" in */lib.sh|*/plan-lib.sh|*/context-lib.sh|*/fp-sources.sh) continue ;; esac   # sourced libraries, never run
   [ -x "$f" ] && ok || nok "$(basename "$f") not executable"
   [ "$(head -n1 "$f")" = "#!/usr/bin/env bash" ] && ok || nok "$(basename "$f") shebang"
   grep -q '^set -euo pipefail' "$f" && ok || nok "$(basename "$f") lacks set -euo pipefail"
   bash -n "$f" && ok || nok "$(basename "$f") syntax"
 done
+
+t "the list of fingerprint sources lives in fp-sources.sh only (SF-1)"
+hits="$(grep -rnE 'rest\|mcp|mcp\|rest' "$P" | grep -v '/scripts/fp-sources.sh:' || true)"
+assert_eq "$hits" "" "a second copy of the source list"
+assert_contains "$(cat "$P/scripts/fp-sources.sh")" 'FP_SOURCES=' "the one list"
+assert_contains "$(cat "$P/scripts/plan-lib.sh")" "fp_source_ok" "plan-lib reads it"
+assert_contains "$(cat "$P/jira/scripts/jira-context.sh")" "fp_source_ok" "jira-context reads it"
+for f in context-lib.sh; do assert_not_contains "$(head -n1 "$P/jira/scripts/$f")" "#!" "$f is sourced, not run"; done
+
+t "the plugin's hooks: valid hooks.json, every command exists, the capture is a no-op without a request"
+HJ="$P/hooks/hooks.json"
+jq -e . "$HJ" >/dev/null 2>&1 && ok || nok "hooks.json is not valid JSON"
+for ref in $(jq -r '.. | .command? // empty' "$HJ" | awk '{print $1}' | tr -d '"' | sort -u); do
+  [ -x "$P/${ref#\$\{CLAUDE_PLUGIN_ROOT\}/}" ] && ok || nok "hooks.json names a missing or non-executable $ref"
+done
+assert_not_contains "$(jq -r '.. | .command? // empty' "$HJ")" "/Users/" "no personal path in hooks.json"
+# a public plugin must not be handed other tools' outputs: no catch-all matcher, every matcher names Jira tools or a bitbucket server
+while IFS= read -r m; do
+  case "$m" in
+    ""|".*"|"^.*"|"^mcp__"|"^mcp__.*"|"^mcp__.+"|"^mcp__.*__.*"|"^mcp__.+__.+"|"^mcp__.*__.+"|"^mcp__.+__.*") nok "hooks.json has a catch-all matcher: $m" ;;
+    *Jira*|*[Bb]itbucket*|*"[Bb][Ii][Tt][Bb][Uu][Cc][Kk][Ee][Tt]"*) ok ;;
+    *) nok "hooks.json matcher names neither Jira tools nor a bitbucket server: $m" ;;
+  esac
+done < <(jq -r '.hooks[][].matcher' "$HJ")
+BBM="$(jq -r '.hooks.PostToolUse[] | select(.hooks[0].command | endswith(" bb")) | .matcher' "$HJ")"
+for s in mcp__bitbucket__createPR mcp__claude_ai_Bitbucket__x mcp__my-bitbucket-server__t mcp__BitBucket_x__t; do
+  printf '%s' "$s" | grep -qE "$BBM" && ok || nok "bb matcher misses server in $s"
+done
+for s in mcp__claude_ai_Gmail__search mcp__claude_ai_Atlassian__getJiraIssue mcp__gmail__bitbucketThing mcp__x__Bitbucket__y; do
+  printf '%s' "$s" | grep -qE "$BBM" && nok "bb matcher takes $s" || ok
+done
+assert_contains "$(sed -n '/^compgen/p' "$P/hooks/mcp-capture.sh")" "plans/*/.mcp/request.json" "the one-glob fast path"
+assert_eq "$(grep -cE 'curl|wget|asdlc_http' "$P/hooks/mcp-capture.sh")" "0" "the hook makes no network calls"
+assert_eq "$(grep -c 'lib.sh' "$P/hooks/mcp-capture.sh")" "0" "the hook parses no config"
 
 t "commands only reference scripts that exist (jira/scripts and the shared scripts/)"
 for ref in $(grep -ohE '\$\{CLAUDE_PLUGIN_ROOT\}/(jira/)?scripts/[a-z-]+\.sh' "$P"/commands/*.md | sort -u); do
@@ -86,7 +120,7 @@ assert_not_contains "$fm" "plan-approve" "plan.md does not pre-approve it"
 assert_contains "$fm" "plan-state.sh validate:*" "plan.md pre-approves only validate and replan"
 assert_contains "$fm" "plan-state.sh replan:*" "replan"
 t "the only script that can approve is plan-approve.sh: no other script re-writes plan_hash"
-for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh; do
+for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh "$P"/hooks/*.sh; do
   case "$f" in */plan-approve.sh) continue ;; esac
   if grep -qE "write_field +plan_hash" "$f"; then nok "$(basename "$f") can approve"; else ok; fi
 done
@@ -174,5 +208,49 @@ done
 assert_contains "$(cat "$P/agents/prd-planner.md")" "context.md" "planner mentions context.md"
 assert_contains "$(cat "$P/agents/prd-planner.md")" "changes.md" "planner mentions changes.md"
 assert_contains "$(cat "$P/agents/plan-critic.md")" "changes.md" "critic checks changes.md"
+
+t "commands pre-approve exactly the expected Atlassian MCP tools: the reads and transitionJiraIssue, never a write, a worklog or a whole server (D-M8)"
+EXPECT_MCP="mcp__claude_ai_Atlassian__getJiraIssue mcp__claude_ai_Atlassian__getTransitionsForJiraIssue mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql mcp__claude_ai_Atlassian__transitionJiraIssue"
+for cf in "$P"/commands/*.md; do
+  cn="$(basename "$cf" .md)"
+  fm="$(sed -n '/^---$/,/^---$/p' "$cf" | grep '^allowed-tools:' || true)"
+  got="$(printf '%s' "$fm" | tr ',' '\n' | sed 's/^ *//; s/^allowed-tools: *//; s/ *$//' | grep -E '^mcp__' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+  if [ "$cn" = jira-run ]; then assert_eq "$got" "$EXPECT_MCP" "jira-run's pre-approved MCP tools"
+  else assert_eq "$got" "" "$cn pre-approves no MCP tool"; fi
+  for bad in addCommentToJiraIssue editJiraIssue createJiraIssue Worklog worklog createIssueLink; do assert_not_contains "$fm" "$bad" "$cn pre-approves $bad"; done
+  # every mcp__ rule names a tool (mcp__<server>__<tool>): no bare server rule, no wildcard
+  bare="$(printf '%s' "$fm" | tr ',' '\n' | sed 's/^ *//; s/^allowed-tools: *//' | grep -E '^mcp__' | grep -vE '^mcp__[A-Za-z0-9_-]+__[A-Za-z]+$' || true)"
+  assert_eq "$bare" "" "$cn: an mcp rule that is not one exact tool (whole server or wildcard)"
+done
+
+t "jira-run.md carries the MCP rule, the transport step and both MCP sequences"
+JR="$(cat "$P/commands/jira-run.md")"
+assert_contains "$JR" "call an Atlassian MCP tool ONLY with the args a script" "the args-a-script-printed rule"
+assert_contains "$JR" "never read its raw" "the never-read-raw rule"
+assert_contains "$JR" "jira-context.sh transport" "step 0 transport resolution"
+assert_contains "$JR" "connect the Atlassian MCP (/mcp)" "the STOP message"
+assert_contains "$JR" "jira-context.sh mcp-request <KEY> --for check" "the check sequence"
+assert_contains "$JR" "jira-context.sh mcp-request <KEY> --for fetch" "the fetch sequence"
+assert_contains "$JR" "fetch <KEY> --source mcp" "fetch from the capture"
+assert_contains "$JR" "Exit 3" "exit 3 falls back to a REST fetch"
+assert_contains "$JR" "jira-mine.sh --mcp-args" "the search sequence"
+assert_contains "$JR" "jira-mine.sh --from-mcp" "the search read"
+
+t "jira-setup.md has the read-only MCP step; the server names stay out of the config (task 6)"
+JS="$(cat "$P/commands/jira-setup.md")"
+assert_contains "$JS" "atlassianUserInfo" "the sign-in check"
+assert_contains "$JS" 'Report only "signed in"' "no names or emails echoed"
+assert_contains "$JS" "project = <JIRA_PROJECT_KEY>" "the count query"
+assert_contains "$JS" '"unverified"' "a 0-count status is unverified"
+assert_contains "$JS" "never create, edit, comment, transition or log work" "read-only"
+assert_contains "$(cat "$P/commands/review-pr.md")" "ASDLC_BB_MCP_SERVER" "review-pr names the same server variable"
+conf_keys="$(. "$P/jira/scripts/lib.sh"; echo $ASDLC_CONF_KEYS)"
+for v in ASDLC_JIRA_MCP_SERVER ASDLC_BB_MCP_SERVER ASDLC_BB_MCP_PROFILE; do
+  case " $conf_keys " in *" $v "*) nok "$v must stay env-only, not a config key" ;; *) ok ;; esac
+done
+for v in JIRA_TRANSPORT BB_TRANSPORT; do
+  case " $conf_keys " in *" $v "*) ok ;; *) nok "$v is a config key" ;; esac
+done
+assert_eq "$(grep -hc '^ASDLC_JIRA_MCP_SERVER=\|^ASDLC_BB_MCP_SERVER=' "$P/jira/templates/jira.conf")" "0" "no server name in the template"
 
 finish

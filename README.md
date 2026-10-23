@@ -40,7 +40,7 @@ This repository is both the plugin source and its marketplace.
 - **Claude Code**: the terminal, an IDE extension, or the Code tab of the Claude desktop app.
 - **All workflows:** `bash` and `git`. [ripgrep](https://github.com/BurntSushi/ripgrep) is optional; the impact scan falls back to `grep` with identical output.
 - **`/asdlc:review-pr`:** the [`gh`](https://cli.github.com/) CLI, signed in, for GitHub PRs. For Bitbucket PRs, a connected Atlassian/Bitbucket MCP server. Without either, it reviews a local branch diff.
-- **Jira leg:** Jira Cloud and Bitbucket Cloud, `curl` and `jq`, and API tokens in your shell environment (`JIRA_EMAIL`, `JIRA_TOKEN`, `BITBUCKET_TOKEN`). Tokens never go in a file. See the [Jira leg guide](plugins/asdlc/jira/README.md).
+- **Jira leg:** Jira Cloud and Bitbucket Cloud, `curl` and `jq`. For Jira, either the Atlassian MCP connector (connected in Claude Code, no token needed) or an API token in your shell environment (`JIRA_EMAIL`, `JIRA_TOKEN`); with the connector the token is optional and only adds image downloads, watchers, sprints and status-name checks. For Bitbucket, `BITBUCKET_TOKEN`. Tokens never go in a file. See the [Jira leg guide](plugins/asdlc/jira/README.md).
 - **PDQC calibration (optional):** Python 3.
 
 ## Install
@@ -142,7 +142,7 @@ Then set `use_seed_checklist: true` and the `seed_checklist` path in your repo's
 - **Plans are approved in the file, by a person.** `/asdlc:plan approve` checks that the plan is complete: required sections filled, open questions answered, critic blockers answered. It then records a hash of the approved part. No command pre-approves that step, so Claude Code always asks you to confirm it.
 - **An edited plan no longer runs.** If the approved part changes after approval, the plan reports `EDITED` and stops until it is re-approved. If a Jira ticket changes after approval, the plan reports `STALE` and is re-planned, and `approve` refuses a stale plan. Agents log progress below a marker that the hash doesn't cover, so a run's own logging never voids the approval.
 - **No silent writes to shared systems.** Commits, pushes and Bitbucket writes are not pre-approved; each one is shown to you first.
-- **Tokens stay in your environment.** The Jira token is sent only to your configured Jira URL.
+- **Tokens stay in your environment.** The Jira token, when you use one, is sent only to your configured Jira URL. Over the Atlassian MCP connector, no token is used and a plugin hook keeps ticket text out of the orchestrator's context.
 
 ## Subagents
 
