@@ -32,7 +32,9 @@ def body_md: if . == null or . == "" then "(no description)"
 #   {summary, description, comments:[{id,body}] (human only), parent, links:[{dir,type,key}],
 #    attachments:[id]}
 # Every value is normalised. Bad ids or keys make jq fail, so the callers fail closed.
-# A fact added here reaches the fingerprint and the snapshot together, never one of them.
+# A fact added here reaches the snapshot (the whole object) only. It also needs its own line in
+# asdlc_fingerprint and a rule in describe_changes (jira-context.sh); the completeness and per-fact
+# tests in tests/jira/test-context.sh fail until both exist.
 JQ_FACTS='
 def facts($c):
   .fields as $f

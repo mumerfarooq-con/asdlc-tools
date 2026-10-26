@@ -85,9 +85,6 @@ ISSUE_FIELDS="summary,description,status,issuetype,parent,issuelinks,attachment"
 # The sources `build` can write (each must also be in FP_SOURCES, which plan-lib.sh checks).
 BUILD_SOURCES="rest mcp"
 
-# Can the REST API be used? A Jira login is set (fixture mode counts, for the tests).
-rest_ready() { [ -n "$ASDLC_FIXTURES" ] || { [ -n "${JIRA_EMAIL:-}" ] && [ -n "${JIRA_TOKEN:-}" ]; }; }
-
 # One REST read of a ticket into <out>. Never exits. Returns 0 ok; 1 HTTP error (READ_CODE is
 # the code, 000 when Jira could not be reached; the error is already on stderr); 3 the key
 # moved or the data is malformed. READ_WHY says why, in a form fit for "UNCHECKED <why>".
@@ -254,7 +251,7 @@ mcp_read() {  # <KEY> <rawdir> <fetch|check>
   [ "$line" != bad ] || { READ_WHY="the capture of $key has no readable comment list"; return 1; }
   read -r n total start <<<"$line"
   if [ "$n" != "$total" ] || [ "$start" != 0 ]; then
-    if [ "$mode" = fetch ] && [ "${JIRA_TRANSPORT:-auto}" = auto ] && rest_ready; then
+    if [ "$mode" = fetch ] && [ "${JIRA_TRANSPORT:-auto}" = auto ] && asdlc_rest_ready; then
       READ_WHY="comments truncated ($n of $total); fetch over REST"; return 3
     fi
     if [ "$mode" = check ]; then READ_WHY="comments truncated ($n of $total); the stale check cannot page them over MCP"
@@ -316,10 +313,10 @@ cmd_fetch() {
   fi
   case "${JIRA_TRANSPORT:-auto}" in auto) ;; mcp) ;; rest) ;; *) FAIL_CODE=2 fail "JIRA_TRANSPORT must be auto, mcp or rest" ;; esac
   if [ "$src" = mcp ] && [ "${JIRA_TRANSPORT:-auto}" = rest ]; then FAIL_CODE=2 fail "JIRA_TRANSPORT=rest: refusing to read $KEY from MCP"; fi
+  if [ "$src" = rest ] && [ "${JIRA_TRANSPORT:-auto}" = mcp ]; then FAIL_CODE=2 fail "JIRA_TRANSPORT=mcp: refusing to fetch $KEY over REST; use fetch $KEY --source mcp"; fi
   if [ "$src" = rest ]; then asdlc_need_jira; else need_jira_base; fi
   need_inputs; guard_plan "$KEY"
   root="plans/$KEY"; mkdir -p "$root"
-  rm -f "$root/fingerprint"   # a crash from here on leaves no fingerprint, never a wrong one
   TMPD="$(mktemp -d "$root/.fetch.XXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
   mkdir -p "$TMPD/raw" "$TMPD/assets"
 
@@ -331,11 +328,12 @@ cmd_fetch() {
     fail "$READ_WHY; nothing was written."
   fi
 
+  rm -f "$root/fingerprint"   # only once the read succeeded; a crash from here on leaves no fingerprint, never a wrong one
   IMG_ISSUE="$TMPD/raw/issue.json"; IMG_NO_DOWNLOAD=""
   if [ "$src" = mcp ]; then
     IMG_ISSUE="$TMPD/raw/mcp-issue.json"
     # The parent came with the capture; REST is only for what MCP cannot do (the image files).
-    rest_ready || IMG_NO_DOWNLOAD="no Jira token: the MCP connector can't download attachments"
+    asdlc_rest_ready || IMG_NO_DOWNLOAD="no Jira token: the MCP connector can't download attachments"
   else
     pkey="$(jq -r '.fields.parent.key // empty' "$TMPD/raw/issue.json")"
     if [ -n "$pkey" ]; then

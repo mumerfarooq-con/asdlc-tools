@@ -59,23 +59,33 @@ slugify() {
   printf '%s' "${s:-work}"
 }
 
-# An MCP capture request (plans/<KEY>/.mcp/, plans/.mcp/) left by a crashed run is dead after its
-# expires_epoch. Drop expired ones; a directory with no readable request goes after 10 minutes.
-# Best effort, never fatal, and never through a symbolic link.
+# An MCP capture request (plans/<KEY>/.mcp/, plans/.mcp/search/, plans/.mcp/bb/) left by a crashed run
+# is dead after its expires_epoch. Each kind is swept by its own request, never by a neighbour's; a
+# directory with no readable request goes after 10 minutes. Best effort, never fatal, and never
+# through a symbolic link (plans, plans/<KEY>, .mcp or the kind's directory).
+sweep_one() {  # <dir>: remove it if its request.json expired (or it has none and is 10 minutes old)
+  local d="$1" f="$1/request.json" exp="" now; now="$(date +%s)"
+  if [ -L "$d" ] || [ ! -d "$d" ]; then return 0; fi
+  if [ -f "$f" ] && [ ! -L "$f" ]; then exp="$(jq -r '.expires_epoch // empty | tostring' "$f" 2>/dev/null || true)"; fi
+  if [[ $exp =~ ^[0-9]+$ ]]; then
+    if [ "$exp" -le "$now" ]; then rm -rf "$d" || true; fi
+  elif [ -n "$(find "$d" -maxdepth 0 -mmin +10 2>/dev/null || true)" ]; then
+    rm -rf "$d" || true
+  fi
+  return 0
+}
 sweep_mcp() {
-  local d f exp now; now="$(date +%s)"
-  for d in "$PLANS"/*/.mcp "$PLANS"/.mcp; do
-    if [ -L "$d" ] || [ ! -d "$d" ]; then continue; fi
-    exp=""
-    for f in "$d/request.json" "$d/search/request.json"; do
-      if [ -f "$f" ] && [ ! -L "$f" ]; then exp="$(jq -r '.expires_epoch // empty | tostring' "$f" 2>/dev/null || true)"; fi
-    done
-    if [[ $exp =~ ^[0-9]+$ ]]; then
-      if [ "$exp" -le "$now" ]; then rm -rf "$d" || true; fi
-    elif [ -n "$(find "$d" -maxdepth 0 -mmin +10 2>/dev/null || true)" ]; then
-      rm -rf "$d" || true
-    fi
+  local d k
+  if [ -L "$PLANS" ]; then return 0; fi
+  for d in "$PLANS"/*/.mcp; do
+    if [ -L "${d%/.mcp}" ]; then continue; fi
+    sweep_one "$d"
   done
+  d="$PLANS/.mcp"
+  if [ ! -L "$d" ] && [ -d "$d" ]; then
+    for k in search bb; do sweep_one "$d/$k"; done
+    rmdir "$d" 2>/dev/null || true       # only when nothing live is left in it
+  fi
   return 0
 }
 

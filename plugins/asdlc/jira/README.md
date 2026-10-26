@@ -321,7 +321,8 @@ All read `.asdlc/jira.conf` (or `--conf <file>`), and all Jira/Bitbucket scripts
 `--fixtures <dir>` to answer from saved JSON instead of the network (see `tests/jira/` in the
 plugin repo for the layout).
 - `jira-mine.sh` — list tickets to plan (`--key/--sprint/--status/--any-status/--anyone`). It
-  prints key, summary, status, priority, type and labels, never the description.
+  prints key, summary, status, priority, type and labels, never the description. Over MCP it lists up to
+  40 tickets per run (the connector's cap) against 50 over REST, and it warns when there are more.
 - `jira-context.sh` — `fetch <KEY> [--source <s>] | build <KEY> --source <s> | fingerprint <rawdir> | check <plan> | mcp-request | transport`:
   the ticket context, the fingerprint and the stale check (see above).
 - `ticket-to-prd.sh` — **deprecated**, `jira-run` no longer uses it. One ticket → `./prds/<KEY>.md`

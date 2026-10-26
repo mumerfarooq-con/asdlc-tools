@@ -116,7 +116,7 @@ mkcap() {  # <KEY> <tool> <role> <response json> [nonce override]: a capture und
 }
 status_resp() { jq -nc --arg k "$1" --arg s "$2" '{issues: {nodes: [{key: $k, fields: {status: {name: $s}}}]}}'; }
 TRANSITIONS='{"transitions":[{"id":"11","name":"Back to backlog","to":{"name":"To Do"}},{"id":"21","name":"Start work","to":{"name":"In Progress"}},{"id":"31","name":"Ready for QA","to":{"name":"QA"}}]}'
-no_rest() { assert_eq "$(requests 2>/dev/null || echo '[]')" "[]" "no REST request"; }
+no_rest() { assert_file "${ASDLC_FIXTURE_LOG:-/nonexistent}"; assert_eq "$(requests)" "[]" "no REST request"; }
 
 t "transition --mcp-args opens a request and prints the two read calls; no network"
 sandbox; use_fixtures basic

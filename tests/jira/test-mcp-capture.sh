@@ -274,7 +274,7 @@ t "a comment write while a fetch request is open is not ours; a transition write
 sandbox; open_req PROJ-1 fetch
 hook "$(write_in addCommentToJiraIssue '{"id":"1"}')"; assert_eq "$CODE/$OUT" "0/" "left alone"; assert_eq "$(ncaps)" "0" "no capture"
 open_req PROJ-1 transition
-hook "$(write_in transitionJiraIssue "" '{"cloudId":"x","issueIdOrKey":"PROJ-1","transition":{"id":"21"}}')"
+hook "$(write_in transitionJiraIssue "" '{"cloudId":"example.atlassian.net","issueIdOrKey":"PROJ-1","transition":{"id":"21"}}')"
 assert_eq "$(ncaps)" "1" "captured"; assert_eq "$(jq -c '[.role, .response]' "$(caps)")" '["transitionJiraIssue",{}]' "empty answer"
 assert_contains "$(receipt_text)" "captured the transitionJiraIssue response" "receipt"
 rm -f "$(caps)"
@@ -302,6 +302,54 @@ run "$RS" unlock "$ID"; assert_eq "$CODE" "0" "unlock exit"
 [ -f plans/PROJ-3/.mcp/request.json ] && ok || nok "unlock swept a live request"
 run "$RS" lock; ID="$OUT"; run "$RS" lock; assert_eq "$CODE" "10" "a refused lock still refuses"
 [ -f plans/PROJ-3/.mcp/request.json ] && ok || nok "live request lost"
+
+t "N-1: a live bb request survives the sweep while an expired search request next to it is removed"
+sandbox 'BB_TRANSPORT=mcp'
+export ASDLC_BB_MCP_SERVER=bbfixture ASDLC_BB_MCP_PROFILE=test ASDLC_ALLOW_TEST_BB_PROFILE=1
+run "$S/bb-open-pr.sh" --mcp-args feature/x "Add x"; assert_eq "$CODE" "0" "bb --mcp-args exit"
+unset ASDLC_BB_MCP_SERVER ASDLC_BB_MCP_PROFILE ASDLC_ALLOW_TEST_BB_PROFILE
+mkdir -p plans/.mcp/search; echo '{"expires_epoch": 1}' > plans/.mcp/search/request.json
+run "$RS" lock; ID="$OUT"; assert_eq "$CODE" "0" "lock exit"
+[ -f plans/.mcp/bb/request.json ] && ok || nok "the live bb request was swept"
+[ ! -e plans/.mcp/search ] && ok || nok "the expired search request was kept"
+jq '.expires_epoch = 1' plans/.mcp/bb/request.json > r.tmp && mv r.tmp plans/.mcp/bb/request.json
+run "$RS" unlock "$ID"; assert_eq "$CODE" "0" "unlock exit"
+[ ! -e plans/.mcp ] && ok || nok "an expired bb request was kept"
+
+t "N-1: a symlinked plans/<KEY> or plans is never followed by the sweep"
+sandbox
+mkdir -p "$SB/elsewhere/.mcp" plans; echo '{"expires_epoch": 1}' > "$SB/elsewhere/.mcp/request.json"
+ln -s "$SB/elsewhere" plans/PROJ-9
+run "$RS" lock; assert_eq "$CODE" "0" "lock exit"
+[ -f "$SB/elsewhere/.mcp/request.json" ] && ok || nok "swept through a symlinked plans/<KEY>"
+sandbox; mkdir -p "$SB/realplans/PROJ-1/.mcp" "$SB/realplans/.mcp/search"
+echo '{"expires_epoch": 1}' > "$SB/realplans/PROJ-1/.mcp/request.json"; echo '{"expires_epoch": 1}' > "$SB/realplans/.mcp/search/request.json"
+ln -s "$SB/realplans" "$SB/plans"
+run "$RS" lock; assert_eq "$CODE" "0" "lock exit, plans is a link"
+[ -f "$SB/realplans/PROJ-1/.mcp/request.json" ] && [ -f "$SB/realplans/.mcp/search/request.json" ] && ok || nok "swept through a symlinked plans"
+
+t "N-1: the hook's capture refuses a symlinked plans directory"
+sandbox; open_req PROJ-1 fetch >/dev/null
+mv plans "$SB/realplans"; ln -s "$SB/realplans" plans
+issue_call PROJ-1
+assert_eq "$CODE" "0" "exit"; assert_contains "$(receipt_text)" "symbolic link" "rejected"
+assert_eq "$(find "$SB/realplans" -name 'cap-*.json' | wc -l | tr -d ' ')" "0" "nothing stored"
+assert_not_contains "$OUT$ERR" "$SENTINEL" "no ticket text"
+
+t "N-2: while a request is open the guard blocks a numeric id and a lower-case key; with none open they pass"
+sandbox
+hook "$(guard_in editJiraIssue '{"issueIdOrKey":"10001","fields":{}}')" guard; assert_eq "$CODE" "0" "no request: numeric id passes"
+hook "$(guard_in addCommentToJiraIssue '{"issueIdOrKey":"proj-1","commentBody":"x"}')" guard; assert_eq "$CODE" "0" "no request: lower-case key passes"
+open_req PROJ-1 comment >/dev/null
+hook "$(guard_in editJiraIssue '{"issueIdOrKey":"10001","fields":{}}')" guard
+assert_eq "$CODE" "2" "numeric id, editJiraIssue"; assert_contains "$ERR" "not a canonical issue key" "reason"
+hook "$(guard_in addCommentToJiraIssue '{"issueIdOrKey":"proj-1","commentId":"7","commentBody":"x"}')" guard
+assert_eq "$CODE" "2" "lower-case key, comment edit"
+hook "$(guard_in addCommentToJiraIssue '{"issueIdOrKey":"10001","commentBody":"[asdlc] x"}')" guard
+assert_eq "$CODE" "2" "numeric id, even a marked comment"
+hook "$(guard_in addCommentToJiraIssue '{"commentBody":"x"}')" guard; assert_eq "$CODE" "2" "no key at all"
+jq '.expires_epoch = (now | floor) - 1' plans/PROJ-1/.mcp/request.json > r.tmp && mv r.tmp plans/PROJ-1/.mcp/request.json
+hook "$(guard_in editJiraIssue '{"issueIdOrKey":"10001","fields":{}}')" guard; assert_eq "$CODE" "0" "expired request: passes again"
 
 # ---- the plugin's hook wiring --------------------------------------------------------------
 t "hooks.json wires the capture to the five tools and the guard to comment and edit only"
@@ -374,5 +422,54 @@ sandbox; open_req PROJ-1 fetch; hook "$(search_in "$(search_text)")"
 assert_eq "$CODE/$OUT/$ERR" "0//" "only an issue request is open: a search is not ours"; assert_eq "$(ncaps)" "0" "nothing captured"
 sandbox; open_search; issue_call PROJ-1
 assert_eq "$CODE/$OUT/$ERR" "0//" "only a search request is open: an issue read is not touched"
+
+# ---- SF-1: every capture must come from the printed site, with the printed args ---------------
+t "a wrong cloudId is rejected, and nothing is stored, in every capture branch"
+cid() {  # <stdin json> <cloudId>: the same call with another cloudId
+  jq -c --arg c "$2" '.tool_input.cloudId = $c' <<<"$1"
+}
+sandbox; open_req PROJ-1 fetch
+hook "$(cid "$(stdin_json "$TOOL" PROJ-1 "$FIELDS" markdown "$(issue_text PROJ-1 PROJ-0)")" "other-site.atlassian.net")"
+expect_rejected "issue read, another cloudId" "use the printed args"
+hook "$(cid "$(stdin_json "$TOOL" PROJ-1 "$FIELDS" markdown "$(issue_text PROJ-1 PROJ-0)")" "")"
+expect_rejected "issue read, empty cloudId" "use the printed args"
+hook "$(stdin_json "$TOOL" PROJ-1 "$FIELDS" markdown "$(issue_text PROJ-1 PROJ-0)" | jq -c 'del(.tool_input.cloudId)')"
+expect_rejected "issue read, no cloudId" "use the printed args"
+hook "$(stdin_json "$TOOL" PROJ-1 "$FIELDS" markdown "$(issue_text PROJ-1 PROJ-0)" | jq -c '.tool_input.cloudId = ["example.atlassian.net"]')"
+expect_rejected "issue read, cloudId of another type" "use the printed args"
+hook "$(stdin_json "$TOOL" PROJ-1 "$FIELDS" markdown "$(issue_text PROJ-1 PROJ-0)" | jq -c 'del(.tool_input.updateHistory)')"
+expect_rejected "issue read, updateHistory missing" "updateHistory"
+hook "$(stdin_json "$TOOL" PROJ-1 "$FIELDS" markdown "$(issue_text PROJ-1 PROJ-0)" | jq -c '.tool_input.updateHistory = true')"
+expect_rejected "issue read, updateHistory true" "updateHistory"
+assert_eq "$(jq -r '.nonce | length > 0' plans/PROJ-1/.mcp/request.json)" "true" "the request is still open"
+# The right call still works, then its parent read is held to the same rules.
+issue_call PROJ-1; assert_eq "$(ncaps)" "1" "the printed call is captured"
+hook "$(cid "$(stdin_json "$TOOL" PROJ-0 "$PFIELDS" markdown "$(issue_text PROJ-0)")" "other-site.atlassian.net")"
+assert_contains "$(receipt_text)" "use the printed args" "parent, another cloudId: receipt"; assert_eq "$(ncaps)" "1" "parent, another cloudId: nothing more stored"
+hook "$(stdin_json "$TOOL" PROJ-0 "$PFIELDS" markdown "$(issue_text PROJ-0)" | jq -c 'del(.tool_input.updateHistory)')"
+assert_contains "$(receipt_text)" "updateHistory" "parent, updateHistory missing: receipt"; assert_eq "$(ncaps)" "1" "parent, updateHistory missing: nothing more stored"
+hook "$(stdin_json "$TOOL" PROJ-0 "$PFIELDS" markdown "$(issue_text PROJ-0)")"
+assert_eq "$(ncaps)" "2" "the printed parent call is captured"
+
+sandbox; open_search
+hook "$(cid "$(search_in "$(search_text)")" "other-site.atlassian.net")"; srej "search, another cloudId" "cloudId"
+sandbox; open_search
+hook "$(search_in "$(search_text)" | jq -c 'del(.tool_input.cloudId)')"; srej "search, no cloudId" "cloudId"
+sandbox; open_search; hook "$(search_in "$(search_text)")"
+assert_eq "$(scaps | grep -c .)" "1" "the printed search is captured"
+
+sandbox; open_req PROJ-1 transition
+TRIN='{"cloudId":"other-site.atlassian.net","issueIdOrKey":"PROJ-1"}'
+hook "$(write_in getTransitionsForJiraIssue '{"transitions":[{"id":"21","name":"Done","to":{"name":"Done"}}]}' "$TRIN")"
+expect_rejected "transitions, another cloudId" "use the printed args"
+hook "$(write_in getTransitionsForJiraIssue '{"transitions":[{"id":"21","name":"Done","to":{"name":"Done"}}]}' '{"issueIdOrKey":"PROJ-1"}')"
+expect_rejected "transitions, no cloudId" "use the printed args"
+hook "$(write_in transitionJiraIssue "" '{"cloudId":"other-site.atlassian.net","issueIdOrKey":"PROJ-1","transition":{"id":"21"}}')"
+expect_rejected "transitionJiraIssue, another cloudId" "use the printed args"
+hook "$(write_in getTransitionsForJiraIssue '{"transitions":[{"id":"21","name":"Done","to":{"name":"Done"}}]}')"
+assert_eq "$(ncaps)" "1" "the printed transitions call is captured"
+sandbox 'NOTIFY_ACCOUNT_IDS=acc-1'; run "$S/jira-notify.sh" --adf PROJ-1 "Ready." >/dev/null
+hook "$(write_in addCommentToJiraIssue '{"id":"5"}' '{"cloudId":"other-site.atlassian.net","issueIdOrKey":"PROJ-1"}')"
+expect_rejected "comment write, another cloudId" "use the printed args"
 
 finish

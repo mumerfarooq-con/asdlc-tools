@@ -203,11 +203,12 @@ ctx_sandbox; plan_file PROJ-1 stale; mkdir -p plans/PROJ-1; printf 'old changes\
 run "$JC" fetch PROJ-1
 [ ! -e plans/PROJ-1/changes.md ] && ok || nok "changes.md kept for a .prev with no fingerprint"
 
-t "fetch removes an old fingerprint first: a failed fetch leaves none"
+t "N-4: a fetch whose read fails leaves the old fingerprint file in place (it is removed only once the read succeeded)"
 ctx_sandbox; run "$JC" fetch PROJ-1; assert_file plans/PROJ-1/fingerprint
+cp plans/PROJ-1/fingerprint "$SB/fp.old"
 echo 503 > "fx/$API/issue/PROJ-1/comment.startAt-3.code"
 run "$JC" fetch PROJ-1; assert_eq "$CODE" "1" "exit"
-[ ! -e plans/PROJ-1/fingerprint ] && ok || nok "fingerprint survived a failed fetch"
+cmp -s plans/PROJ-1/fingerprint "$SB/fp.old" && ok || nok "the old fingerprint was removed or changed by a failed fetch"
 assert_file plans/PROJ-1/raw/issue.json; assert_eq "$(ls -a plans/PROJ-1 | grep -c '^\.fetch\.')" "0" "temp dir cleaned up"
 
 t "comments that do not add up to the total: retried once, then an error and nothing written"
@@ -576,8 +577,21 @@ for fn in fetch_comments rest_read_issue source_read; do
   if printf '%s\n' "$body" | grep -qE '(^|[^A-Za-z_-])exit([^A-Za-z_-]|$)'; then nok "$fn calls exit"; else ok; fi
 done
 
-t "N-10: the fingerprint and the change report both come from the facts program"
-assert_eq "$(grep -c 'facts(' "$S/context-lib.sh")" "3" "definition, fingerprint and snapshot"
+t "SF-2: the facts output holds exactly the six facts the fingerprint and the change report know (both sources)"
+# A new key in facts reaches the snapshot on its own, but the fingerprint and describe_changes list
+# the facts by hand. This fails until a seventh key is added HERE, which is the reminder to give it a
+# fingerprint line and a describe_changes rule (the per-fact test below then has to cover it).
+FACT_KEYS='["attachments","comments","description","links","parent","summary"]'
+facts_keys() {  # <rawdir>: the sorted key set of the facts of a raw dir, whichever its source
+  ( . "$ROOT/plugins/asdlc/scripts/fp-sources.sh"; . "$S/context-lib.sh"; PIPELINE_COMMENT_MARKER='[asdlc]'
+    snapshot "$1" "$SB/facts.json" && jq -c 'keys' "$SB/facts.json" )
+}
+ctx_sandbox; run "$JC" fetch PROJ-1
+assert_eq "$(facts_keys plans/PROJ-1/raw)" "$FACT_KEYS" "REST: the facts' key set"
+mcp_sandbox; run "$JC" fetch PROJ-1 --source mcp
+assert_eq "$(facts_keys plans/PROJ-1/raw)" "$FACT_KEYS" "mcp: the facts' key set"
+assert_eq "$(jq -c '[.comments, .links, .attachments] | map(length > 0)' "$SB/facts.json")" "[true,true,true]" "mcp: the fixture has comments, links and attachments"
+assert_eq "$(jq -r '.parent' "$SB/facts.json")" "PROJ-0" "mcp: the fixture has a parent"
 ctx_sandbox; run "$JC" fetch PROJ-1; run "$JC" fingerprint plans/PROJ-1/raw; assert_contains "$OUT" "sha256:"
 
 t "N-5: fetch.json records a hash of the marker; a changed marker is named in the report"
@@ -790,9 +804,18 @@ conf_set JIRA_TRANSPORT bogus; run "$JC" fetch PROJ-1 --source mcp; assert_eq "$
 run "$JC" fetch PROJ-1 --source ftp; assert_eq "$CODE" "2" "unknown source"
 run "$JC" fetch PROJ-1 --source; assert_eq "$CODE" "2" "source without a value"
 run "$JC" fetch PROJ-1 extra; assert_eq "$CODE" "2" "stray argument"
-ctx_sandbox; conf_set JIRA_TRANSPORT mcp; run "$JC" fetch PROJ-1; assert_eq "$CODE" "0" "a plain fetch is still REST"
+ctx_sandbox; conf_set JIRA_TRANSPORT mcp
+run "$JC" fetch PROJ-1; assert_eq "$CODE" "2" "N-3: under mcp a plain fetch (REST) is refused"; assert_contains "$ERR" "JIRA_TRANSPORT=mcp" "message"
+run "$JC" fetch PROJ-1 --source rest; assert_eq "$CODE" "2" "N-3: under mcp, --source rest is refused"
+assert_eq "$(requests)" "[]" "N-3: nothing was requested"; [ ! -e plans/PROJ-1 ] && ok || nok "N-3: something was written"
+ctx_sandbox; conf_set JIRA_TRANSPORT auto; run "$JC" fetch PROJ-1; assert_eq "$CODE" "0" "under auto a plain fetch is still REST"
 assert_eq "$(sed -n 3p plans/PROJ-1/fingerprint)" "fingerprint_source: rest" "source"
 assert_eq "$(jq -r 'has("source")' plans/PROJ-1/raw/fetch.json)" "false" "REST fetch.json is unchanged"
+t "N-4: an mcp fetch with no capture leaves the old fingerprint file in place"
+mcp_sandbox; run "$JC" fetch PROJ-1 --source mcp; assert_eq "$CODE" "0" "first fetch"
+cp plans/PROJ-1/fingerprint "$SB/fp.old"; run "$JC" mcp-request PROJ-1 --for fetch
+run "$JC" fetch PROJ-1 --source mcp; assert_eq "$CODE" "1" "no capture: exit"
+cmp -s plans/PROJ-1/fingerprint "$SB/fp.old" && ok || nok "the old fingerprint file was removed by an mcp fetch with no capture"
 mcp_sandbox; run env -u ASDLC_FIXTURES -u JIRA_EMAIL -u JIRA_TOKEN "$JC" fetch PROJ-1 --source mcp; assert_eq "$CODE" "0" "mcp fetch needs no token"
 
 # ---- the stale check for mcp plans, and the transport report -------------------------------
@@ -870,6 +893,32 @@ assert_eq "$(requests)" "[]" "no REST request"
 ctx_sandbox; approved_plan; conf_set JIRA_TRANSPORT mcp; run "$JC" check plans/PROJ-1.plan.md
 assert_eq "$CODE/$OUT" "0/FRESH" "a rest plan under JIRA_TRANSPORT=mcp"; assert_contains "$(gets)" "/issue/PROJ-1" "went over REST"
 [ ! -e plans/PROJ-1/.mcp ] && ok || nok "no request was opened"
+
+t "SF-2: changing any one fact changes the fingerprint (STALE) and changes.md names it, for both sources"
+LINK='{"type":{"name":"Relates","inward":"relates to","outward":"relates to"},"outwardIssue":{"key":"PROJ-7","fields":{}}}'
+ATT='{"id":"10099","filename":"n.png","mimeType":"image/png","size":1}'
+fact_case() {  # <source> <fact> <jq filter on the issue (REST) or node (mcp)> <verdict> <changes.md fragment>
+  local src="$1" fact="$2" f="$3"
+  if [ "$src" = rest ]; then
+    ctx_sandbox; approved_plan
+    if [ "$fact" = comments ]; then edit_fx issue/PROJ-1/comment.json "$f"; else edit_fx issue/PROJ-1.json "$f"; fi
+  else
+    mcp_approved_plan; check_caps "$f"
+  fi
+  run "$JC" check plans/PROJ-1.plan.md
+  assert_eq "$CODE" "17" "$src $fact: STALE"; assert_eq "$(printf '%s' "$OUT" | head -n1)" "STALE $4" "$src $fact: verdict"
+  assert_contains "$(cat plans/PROJ-1/changes.md)" "$5" "$src $fact: changes.md"
+}
+for src in rest mcp; do
+  if [ "$src" = rest ]; then CEDIT='(.comments[] | select(.id == "105") | .body) += " (edited)"'
+  else CEDIT='(.fields.comment.comments[] | select(.id == "105") | .body) += " (edited)"'; fi
+  fact_case "$src" summary '.fields.summary += " v2"' "title edited" "## Title edited"
+  fact_case "$src" description '.fields.description += " more"' "description edited" "## Description edited (diff, old to new)"
+  fact_case "$src" comments "$CEDIT" "1 edited comment" $'## Edited comments (ids)\n- 105'
+  fact_case "$src" parent '.fields.parent.key = "PROJ-8"' "parent changed" "- from PROJ-0 to PROJ-8"
+  fact_case "$src" links ".fields.issuelinks += [$LINK]" "1 link added" "- outward Relates PROJ-7"
+  fact_case "$src" attachments ".fields.attachment += [$ATT]" "1 attachment added" $'## Attachments added (ids)\n- 10099'
+done
 
 t "transport: prints the settings with no network and no config"
 sandbox; mv .asdlc/jira.conf "$SB/c.off"

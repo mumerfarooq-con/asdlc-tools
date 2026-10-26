@@ -144,9 +144,9 @@ if [ "$TOOL" = searchJiraIssuesUsingJql ]; then
   [ "$SERVER" = "${ssrv:-}" ] || reject "the tool belongs to another MCP server than the request names"
   if [ "${#IN}" -gt "$MAXB" ]; then reject "the response is larger than the capture limit"; fi
   printf '%s' "$IN" | jq -e --slurpfile r "$SEARCH_REQ" '
-      ($r[0]) as $w | (.tool_input.jql == $w.jql) and (.tool_input.maxResults == $w.maxResults)
+      ($r[0]) as $w | (.tool_input.cloudId == $w.cloud_id) and (.tool_input.jql == $w.jql) and (.tool_input.maxResults == $w.maxResults)
       and (.tool_input.fields | type) == "array" and ((.tool_input.fields | sort) == ($w.fields | sort))' >/dev/null 2>&1 \
-    || reject "the call's jql, fields or maxResults differ from what the request asked for"
+    || reject "the call's jql, fields or maxResults differ from what the request asked for, or its cloudId does (use the printed args)"
   STMP="$(mktemp -d "$SD/.cap.XXXXXX")" || reject "could not write inside the request directory"
   trap 'rm -rf "$STMP"; finish' EXIT
   printf '%s' "$IN" | jq -c "$NORMJQ"'.tool_response | norm' > "$STMP/resp.json" 2>/dev/null || reject "the response is not valid JSON"
@@ -164,7 +164,9 @@ fi
 
 # Find the open request for KEY (as the ticket, or as the parent its issue capture named).
 REQ=""; ROLE=""; ANY=0; EXPIRED=0; UNSAFE=0
+[ ! -L plans ] || UNSAFE=1      # a symlinked plans directory is never followed
 for f in plans/*/.mcp/request.json; do
+  [ "$UNSAFE" = 0 ] || break
   [ -e "$f" ] || [ -L "$f" ] || continue
   d="${f%/request.json}"
   if [ -L "$f" ] || [ -L "$d" ] || [ -L "${d%/.mcp}" ]; then UNSAFE=1; continue; fi
@@ -182,8 +184,20 @@ done
 
 # ---- the guard ---------------------------------------------------------------------------
 if [ "$MODE" = guard ]; then
-  [ -n "$REQ" ] || exit 0
   case "$TOOL" in addCommentToJiraIssue|editJiraIssue) ;; *) exit 0 ;; esac
+  if [ -z "$KEY" ]; then
+    # A key that is not canonical (a numeric id, a lower-case key) matches no request, so it must
+    # not be a way round the guard while any request is open.
+    if [ "$ANY" = 0 ] && [ "$SEARCH_OPEN" = 1 ] && [ ! -L "$SEARCH_REQ" ]; then
+      sx="$(jq -r '.expires_epoch // 0 | tostring' "$SEARCH_REQ" 2>/dev/null)" || sx=0
+      if [[ $sx =~ ^[0-9]+$ ]] && [ "$sx" -gt "$NOW" ]; then ANY=1; fi
+    fi
+    if [ "$ANY" = 1 ]; then
+      echo "asdlc: a pipeline request is open and this call's issueIdOrKey is not a canonical issue key (like ABC-123); comment and issue edits are blocked until it closes. Not posted." >&2; exit 2
+    fi
+    exit 0
+  fi
+  [ -n "$REQ" ] || exit 0
   if [ "$TOOL" = editJiraIssue ]; then
     echo "asdlc: $KEY has an open pipeline request; editing the issue is blocked. Pipeline comments are new comments only." >&2; exit 2
   fi
@@ -228,12 +242,17 @@ PURPOSE="$(rq '.purpose')"
 [[ $PURPOSE =~ ^(fetch|check|transition|comment)$ ]] || reject "unreadable request"
 if [ "${#IN}" -gt "$MAXB" ]; then reject "the response is larger than the capture limit"; fi
 
+# Every stored capture must come from the site the script printed (the connector can reach several).
+if ! printf '%s' "$IN" | jq -e --slurpfile r "$REQ" '(.tool_input.cloudId | type) == "string" and .tool_input.cloudId == $r[0].cloud_id' >/dev/null 2>&1; then
+  reject "the call's cloudId differs from the one the request printed (use the printed args)"
+fi
+
 if [ "$TOOL" = getJiraIssue ]; then
   want="$(jq -c --arg c "$CALL" '.calls[$c]' "$REQ" 2>/dev/null)" || reject "unreadable request"
   printf '%s' "$IN" | jq -e --argjson w "$want" '
       (.tool_input.fields | type) == "array" and ((.tool_input.fields | sort) == ($w.fields | sort))
-      and (.tool_input.responseContentFormat == $w.format)' >/dev/null 2>&1 \
-    || reject "the call's fields or format differ from what the request asked for"
+      and (.tool_input.responseContentFormat == $w.format) and (.tool_input.updateHistory == false)' >/dev/null 2>&1 \
+    || reject "the call's fields or format differ from what the request asked for, or updateHistory is not false (use the printed args)"
 fi
 
 TMP="$(mktemp -d "$RD/.cap.XXXXXX")" || reject "could not write inside the request directory"
