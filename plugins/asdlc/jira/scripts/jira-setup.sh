@@ -4,7 +4,8 @@
 #   jira-setup.sh init [--force]   # write .asdlc/jira.conf from the template; values
 #                                  # pre-filled from the env vars older setups used
 #   jira-setup.sh check            # config complete, tokens set, one Jira + one
-#                                  # Bitbucket call, workflow statuses exist
+#                                  # Bitbucket call, workflow statuses exist (Jira calls are
+#                                  # skipped under JIRA_TRANSPORT=mcp, or auto with no token)
 #   jira-setup.sh docs             # create the access-rules and known-traps files if missing
 # Exit 1 when a check fails; warnings alone exit 0.
 set -euo pipefail
@@ -101,6 +102,8 @@ do_check() {
   for k in MAX_IMAGES MAX_IMAGE_MB; do
     [[ "${!k}" =~ ^[0-9]+$ ]] || fail "$k must be a whole number (is '${!k}')"
   done
+  case "$JIRA_TRANSPORT" in auto) ;; mcp) ;; rest) ;; *) fail "JIRA_TRANSPORT must be auto, mcp or rest (is '$JIRA_TRANSPORT')" ;; esac
+  case "$BB_TRANSPORT" in rest) ;; mcp) ;; *) fail "BB_TRANSPORT must be rest or mcp (is '$BB_TRANSPORT')" ;; esac
   [ -n "$(asdlc_trim "$PIPELINE_COMMENT_MARKER")" ] || fail "PIPELINE_COMMENT_MARKER must not be empty: the pipeline's Jira comments start with it"
   case "$PIPELINE_COMMENT_MARKER" in *$'\n'*) fail "PIPELINE_COMMENT_MARKER must be one line" ;; esac
   # Where the tokens would go: refuse before any call. The checks exit on a bad
@@ -110,16 +113,41 @@ do_check() {
   if [ -n "$BB_WORKSPACE" ] && [ -n "$BB_REPO" ] && ! why="$(asdlc_check_bb_target 2>&1)"; then fail "$why"; fi
   [ "$fails" -eq 0 ] || return 0
 
+  # Which transports are in play. The Jira REST calls need a login; under mcp, or under auto with
+  # no login, they are skipped and what is lost is listed (the user's MCP connector does the reads).
+  local jira_rest=1 bb_rest=1 have_login=0
+  if { [ -n "${JIRA_EMAIL:-}" ] && [ -n "${JIRA_TOKEN:-}" ]; } || [ -n "$ASDLC_FIXTURES" ]; then have_login=1; fi
+  if [ "$JIRA_TRANSPORT" = mcp ] || { [ "$JIRA_TRANSPORT" = auto ] && [ "$have_login" -eq 0 ]; }; then jira_rest=0; fi
+  [ "$BB_TRANSPORT" = rest ] || bb_rest=0
+
   # Token env vars: report presence only, never values.
-  for k in JIRA_EMAIL JIRA_TOKEN BITBUCKET_TOKEN; do
-    if [ -n "${!k:-}" ] || [ -n "$ASDLC_FIXTURES" ]; then ok "env $k is set"; else fail "env $k is not set"; fi
-  done
-  if [ "$BB_AUTH" = "basic" ] && [ -z "${BITBUCKET_EMAIL:-}" ] && [ -z "$ASDLC_FIXTURES" ]; then
-    fail "env BITBUCKET_EMAIL is not set (BB_AUTH=basic)"
+  if [ "$jira_rest" -eq 1 ]; then
+    for k in JIRA_EMAIL JIRA_TOKEN; do
+      if [ -n "${!k:-}" ] || [ -n "$ASDLC_FIXTURES" ]; then ok "env $k is set"; else fail "env $k is not set"; fi
+    done
+  else
+    if [ "$have_login" -eq 1 ]; then warn "JIRA_TRANSPORT=mcp: the Jira token checks and REST test calls are skipped; the Atlassian MCP connector does the Jira work"
+    else warn "no Jira login (JIRA_EMAIL/JIRA_TOKEN) with JIRA_TRANSPORT=$JIRA_TRANSPORT: the Jira token checks and REST test calls are skipped"; fi
+    warn "without a Jira token over MCP you lose: ticket images (the connector cannot download attachments), watchers, sprints and the board lookups, the status-name check (MCP does not report unknown statuses), and the REST fallback for truncated comment threads (such a ticket is refused)"
+    warn "check the connector in /asdlc:jira-setup (MCP step): the tool is present, you are signed in, and project $JIRA_PROJECT_KEY has tickets"
+  fi
+  if [ "$bb_rest" -eq 1 ]; then
+    if [ -n "${BITBUCKET_TOKEN:-}" ] || [ -n "$ASDLC_FIXTURES" ]; then ok "env BITBUCKET_TOKEN is set"; else fail "env BITBUCKET_TOKEN is not set"; fi
+    if [ "$BB_AUTH" = "basic" ] && [ -z "${BITBUCKET_EMAIL:-}" ] && [ -z "$ASDLC_FIXTURES" ]; then
+      fail "env BITBUCKET_EMAIL is not set (BB_AUTH=basic)"
+    fi
+  else
+    local bbe; bbe="$(mktemp)"
+    if asdlc_bb_mcp_check 2>"$bbe"; then
+      ok "BB_TRANSPORT=mcp: server $BBM_SERVER, profile $BBM_PROFILE"
+      warn "BB_TRANSPORT=mcp: the Bitbucket token checks and REST test calls are skipped"
+    else fail "$(cat "$bbe")"; fi
+    rm -f "$bbe"
   fi
   [ "$fails" -eq 0 ] || return 0
 
   local tmp code; tmp="$(mktemp)"
+  if [ "$jira_rest" -eq 1 ]; then
   code=$(asdlc_http jira GET /rest/api/2/myself "$tmp")
   if asdlc_http_ok "$code"; then ok "Jira: signed in as $(jq -r '.displayName // .emailAddress // "?"' "$tmp") at ${JIRA_BASE_URL#https://}"
   else fail "Jira test call (HTTP $code)"; asdlc_http_fail jira "$code" "$tmp" 2>&1 | sed 's/^/      /'; fi
@@ -152,7 +180,9 @@ do_check() {
     printf '%s\n' "$names" | grep -qxF "$STATUS_NEEDS_INFO" || \
       echo "      (a Jira admin must add it before TICKET_CHECK_MODE=strict can move tickets there)"
   else fail "Jira workflow statuses (HTTP $code)"; fi
+  fi
 
+  if [ "$bb_rest" -eq 1 ]; then
   code=$(asdlc_http bb GET "/repositories/$BB_WORKSPACE/$BB_REPO" "$tmp")
   if asdlc_http_ok "$code"; then ok "Bitbucket: $(jq -r '.full_name' "$tmp")"
   else fail "Bitbucket test call (HTTP $code)"; asdlc_http_fail bb "$code" "$tmp" 2>&1 | sed 's/^/      /'; fi
@@ -160,6 +190,7 @@ do_check() {
   code=$(asdlc_http bb GET "/repositories/$BB_WORKSPACE/$BB_REPO/refs/branches/$TARGET_BRANCH" "$tmp")
   if asdlc_http_ok "$code"; then ok "Bitbucket branch: $TARGET_BRANCH"
   else fail "Bitbucket branch $TARGET_BRANCH not found (HTTP $code)"; fi
+  fi
   rm -f "$tmp"
 
   for k in ACCESS_RULES_PATH KNOWN_TRAPS_PATH; do

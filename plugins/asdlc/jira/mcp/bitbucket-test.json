@@ -1,0 +1,27 @@
+{
+  "profile": "test",
+  "test": true,
+  "note": "Synthetic tool names for the test suite; not a real Bitbucket MCP server. The seam refuses this profile unless ASDLC_ALLOW_TEST_BB_PROFILE=1. To add a real one, copy it to bitbucket-<name>.json (without the test flag), set the server's tool names, argument names and response paths, and set ASDLC_BB_MCP_SERVER (and ASDLC_BB_MCP_PROFILE if the profile name differs) in your shell environment.",
+  "open_pr": {
+    "tool": "testOpenPullRequest",
+    "args": {
+      "workspace": "{workspace}",
+      "repo_slug": "{repo}",
+      "title": "{title}",
+      "source_branch": "{source}",
+      "destination_branch": "{dest}",
+      "close_source_branch": true
+    },
+    "response": { "id": "id", "url": "links.html.href" }
+  },
+  "pr_comment": {
+    "tool": "testCreatePrComment",
+    "args": {
+      "workspace": "{workspace}",
+      "repo_slug": "{repo}",
+      "pull_request_id": "{pr}",
+      "content": "{text}"
+    },
+    "response": { "id": "id", "url": "links.html.href" }
+  }
+}

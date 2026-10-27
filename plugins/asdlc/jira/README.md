@@ -12,7 +12,9 @@
 So the rhythm is: run it (plans get written), walk away, come back and approve the good plans,
 run it again (approved ones execute, new ones get planned). Approval is durable state in the plan
 file, hard-bound to a hash so an "approved" marker can only ever run the exact plan you read.
-No Jira or Bitbucket MCP anywhere — every call is a REST call from a script, using your API tokens.
+Jira is reached through the Atlassian MCP connector when it is connected, else through REST calls
+from a script using your API token (see [Transport](#transport)). Bitbucket uses REST and your
+token by default; a Bitbucket MCP server is an opt-in alternative.
 
 Needs `bash`, `curl`, `jq` and `git`.
 
@@ -23,10 +25,14 @@ Run `/asdlc:jira-setup` from the repo root. It:
   plain `KEY=value` (parsed, never executed). If your shell still has the env vars older in-repo
   versions used (`JIRA_URL`, `JIRA_PROJECT`, `BITBUCKET_*`...), their values are pre-filled;
 - checks the token env vars, makes one test call each to Jira and Bitbucket, and checks every
-  configured status exists in the project's workflow;
+  configured status exists in the project's workflow. With no Jira token (MCP only) the token
+  checks and the REST calls become warnings that list what you lose, and the Jira connector is
+  checked instead (the tool is present, you are signed in, the project returns tickets);
 - creates `docs/access-rules.md` and `docs/known-traps.md` from templates if missing.
 
-Tokens never go in the config. Keep them in your shell profile, out of git:
+Tokens never go in the config. The Jira token is optional when the Atlassian MCP connector is
+connected (see [Transport](#transport)); the Bitbucket token is needed unless you use a Bitbucket
+MCP server. Keep them in your shell profile, out of git:
 ```bash
 export JIRA_EMAIL="you@example.com"     # your Atlassian login
 export JIRA_TOKEN="..."                 # id.atlassian.com > Security > API tokens
@@ -47,6 +53,7 @@ never in the repo:
 ```bash
 export ASDLC_JIRA_ALLOWED_HOSTS="jira.example.com"   # comma-separated; shell profile only
 ```
+This applies to the REST path only. Under MCP no token is sent by the plugin at all.
 A committed config can't grant itself a host: this variable is not a config key, and putting it
 in `.asdlc/jira.conf` only produces an "unknown key" warning. `jira-setup.sh check` prints the host
 it signed in to.
@@ -119,8 +126,9 @@ impact.md. If a search itself fails, the scan stops with exit 2 and writes no im
 two passes per plan; `--reset` starts over for a re-plan.
 
 ## The ticket context
-Planning a Jira ticket starts with `jira-context.sh fetch <KEY>` (REST, the same token as the
-other scripts). It writes a bundle under `./plans/<KEY>/`:
+Planning a Jira ticket starts with `jira-context.sh fetch <KEY>` (over MCP or REST, see
+[Transport](#transport); under MCP the description is Markdown converted by Jira, under REST it is
+wiki markup). It writes a bundle under `./plans/<KEY>/`:
 ```
 plans/PROJ-142/
   raw/          the Jira responses as received (issue.json, comments-<startAt>.json, parent.json, fetch.json)
@@ -171,7 +179,7 @@ and its comments again (no parent body, no downloads; only GETs) and compares:
 |---|---|---|
 | `FRESH` | 0 | The ticket is as it was. The plan runs. |
 | `STALE <summary>` | 17 | The ticket changed. The plan becomes `stale`, is copied to `<KEY>.plan.prev.md`, and `plans/<KEY>/changes.md` lists the change (new, edited or removed comment ids, a description diff of at most 200 lines, parent, link and attachment changes). A plan that `--reset-executing` restored also reports its recorded branch. |
-| `UNCHECKED <reason>` | 21 | The ticket couldn't be checked (network error, timeout, 401, 403, 404, 429, 5xx, bad config, a moved key, or a `fingerprint_source` other than `rest`). The plan is not run and is left as it was. |
+| `UNCHECKED <reason>` | 21 | The ticket couldn't be checked (network error, timeout, 401, 403, 404, 429, 5xx, bad config, a moved key, or a `fingerprint_source` it can't read: a plan built over MCP when the connector is not connected or the capture is missing). The plan is not run and is left as it was. |
 
 Exit 2 means the check refused: the plan isn't runnable, isn't a Jira plan, or has no fingerprint.
 
@@ -185,7 +193,77 @@ has a fingerprint, so you know the ticket wasn't looked at.
 
 Plan and execute a ticket with the same Jira account. Jira hides some comments (restricted ones)
 from some accounts, so the planning account and the checking account could see different
-comments, and the check would report a false STALE.
+comments, and the check would report a false STALE. The account is whichever one the call runs as:
+your API token's account over REST, the account signed in to the MCP connector over MCP. Do not
+plan with one and check with the other.
+
+## Transport
+Jira is reached two ways, chosen by `JIRA_TRANSPORT` in `.asdlc/jira.conf`:
+
+| Value | Meaning |
+|---|---|
+| `auto` (default) | The Atlassian MCP connector when it is connected, else REST with your token. |
+| `mcp` | The connector only. No token needed. |
+| `rest` | Your token only. |
+
+The connector's server name is `claude_ai_Atlassian` by default. If yours is named differently, set
+`ASDLC_JIRA_MCP_SERVER` in your shell environment (never in the config: a committed file must not
+choose which server receives your ticket reads). `jira-context.sh transport` prints what is in
+effect. Bitbucket has its own key, `BB_TRANSPORT` (`rest`, the default, or `mcp`). For `mcp` set
+`ASDLC_BB_MCP_SERVER` (and `ASDLC_BB_MCP_PROFILE` if the profile name differs from the server name)
+in your shell. No real Bitbucket profile ships yet, so use `rest` until one does. `BB_TRANSPORT=mcp`
+never falls back to REST.
+
+A plan remembers how its ticket was read (`fingerprint_source: rest` or `mcp`) and is checked the
+same way. A plan built over MCP is checked only over MCP: if the connector is not connected, the
+check says `UNCHECKED`, and you either connect it (`/mcp`) or run `/asdlc:plan replan <KEY>` to
+plan over REST. The two sources produce different fingerprints, so switching transport makes you
+re-plan; it never gives a false FRESH.
+
+What MCP cannot do, compared with REST (each is a warning in `jira-setup.sh check`):
+- **Images** can't be downloaded (the connector has no attachment download). They are listed as
+  skipped; with a token set, they are fetched over REST.
+- **Watchers** can't be added (`jira-notify.sh` skips them without a token). The comment still posts.
+- **Sprints** (`--sprint`) need REST.
+- **Status names** are not validated: an unknown status in `STATUS_*` or `--status` looks like zero
+  results instead of an error, so `jira-setup` says "unverified".
+- **Very long comment threads** are cut off by the connector. A fetch with a token set (and
+  `auto`) falls back to REST for that ticket. Without a token the fetch stops and says so, and a
+  check gives `UNCHECKED`; nothing is silently incomplete.
+
+Comments the pipeline writes are always marker-first (they start with `PIPELINE_COMMENT_MARKER`)
+and are posted only after you confirm the tool call. Editing an issue and creating tickets are
+never pre-approved either. `jira-run` pre-approves only the four read and transition tools of the
+default connector name; another server name prompts for each call.
+
+### The capture hook
+So that ticket text never reaches the orchestrator model, the plugin ships a hook
+(`hooks/mcp-capture.sh`, registered in `hooks/hooks.json`) for MCP calls. A script opens a request
+first (`jira-context.sh mcp-request`, `jira-mine.sh --mcp-args`, `jira-transition.sh --mcp-args`,
+`jira-notify.sh --adf`, or the Bitbucket equivalents). While a request is open, the hook:
+- writes the response of the matching tool call to a capture file: `plans/<KEY>/.mcp/` for a
+  ticket, `plans/.mcp/search/` for a ticket search, `plans/.mcp/bb/` for a Bitbucket call (and
+  only the PR id and URL for a Bitbucket call, only the comment id for a Jira comment);
+- replaces the tool output the model sees with a short receipt (a count or an id, no ticket text),
+  so the orchestrator gets "captured" and the script reads the capture;
+- refuses a call that does not match the open request (another key, other arguments, a stringified
+  `fields`) with a receipt and no capture, so nothing leaks;
+- blocks, before it runs, a comment that does not start with the marker, and any edit of an issue
+  while a request for it is open.
+
+A request expires after 10 minutes. A capture is used up when a script reads it, and the run lock
+sweeps leftovers. With no open request the hook does nothing: it exits after one file test and
+the tool output is untouched. It is registered for the Jira read, transition and comment tools, and
+for Bitbucket only on servers whose name contains `bitbucket` (any case, for example `bitbucket`,
+`claude_ai_Bitbucket` or `my-bitbucket-server`), so other connectors (mail, drive and so on) never
+reach the plugin. A Bitbucket MCP server must therefore have "bitbucket" in its name to be captured.
+
+Trust model: this guards against ticket text drifting into the orchestrator's context and against
+an unmarked comment or an unexpected edit slipping through. It does not defend against a hostile
+orchestrator: the capture files live in your working tree and are writable by the model, and the
+model could call the same tools without the hook. Treat the captures like `plans/`: keep them out of
+git (`plans/*/` and `plans/.mcp/` are covered by the ignore lines above) and review what a run asks
+to confirm.
 
 ## Run it
 ```
@@ -243,8 +321,9 @@ All read `.asdlc/jira.conf` (or `--conf <file>`), and all Jira/Bitbucket scripts
 `--fixtures <dir>` to answer from saved JSON instead of the network (see `tests/jira/` in the
 plugin repo for the layout).
 - `jira-mine.sh` — list tickets to plan (`--key/--sprint/--status/--any-status/--anyone`). It
-  prints key, summary, status, priority, type and labels, never the description.
-- `jira-context.sh` — `fetch <KEY> | build <KEY> --source rest | fingerprint <rawdir> | check <plan>`:
+  prints key, summary, status, priority, type and labels, never the description. Over MCP it lists up to
+  40 tickets per run (the connector's cap) against 50 over REST, and it warns when there are more.
+- `jira-context.sh` — `fetch <KEY> [--source <s>] | build <KEY> --source <s> | fingerprint <rawdir> | check <plan> | mcp-request | transport`:
   the ticket context, the fingerprint and the stale check (see above).
 - `ticket-to-prd.sh` — **deprecated**, `jira-run` no longer uses it. One ticket → `./prds/<KEY>.md`
   (description only; no comments, parent or images).

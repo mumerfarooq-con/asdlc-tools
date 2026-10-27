@@ -4,6 +4,21 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.5.0] - 2026-10-23
+
+### Added
+
+- **Jira over the Atlassian MCP connector, with the token as fallback.** `JIRA_TRANSPORT` in `.asdlc/jira.conf` is `auto` (default: MCP when connected, else REST), `mcp` or `rest`. The connector's server name defaults to `claude_ai_Atlassian`; set `ASDLC_JIRA_MCP_SERVER` in your shell for another. Ticket fetch, the stale check, ticket search, transitions and comments all work over MCP, and no Jira token is needed. MCP cannot download images, add watchers, list sprints or validate status names, and cuts off very long comment threads; `jira-setup.sh check` warns about each. A plan built over MCP records `fingerprint_source: mcp` and is checked only over MCP (otherwise `UNCHECKED`: connect the connector or re-plan). The REST fingerprints are unchanged.
+- **Capture hook** (`hooks/hooks.json`, `hooks/mcp-capture.sh`). While a script has opened a request, the response of the matching MCP call is stored under `plans/` and the model sees only a receipt, so ticket text stays out of the orchestrator's context. It does nothing otherwise, expires a request after 10 minutes, and blocks an unmarked comment or an edit while a request is open. It is registered for the Jira tools and for MCP servers whose name contains `bitbucket`; no other server's calls reach it.
+- **Bitbucket MCP seam.** `BB_TRANSPORT` (`rest`, the default, or `mcp`) with `ASDLC_BB_MCP_SERVER` and `ASDLC_BB_MCP_PROFILE`. No real profile ships yet, so REST stays the way to reach Bitbucket.
+- `jira-context.sh transport` prints the transport in effect.
+
+### Changed
+
+- Plan and execute a ticket with the same account, which now includes the account signed in to the MCP connector.
+- `jira-run` pre-approves the read and transition tools of the default connector name only. Comments (always marker-first), edits and ticket creation stay confirmed by you.
+- Internal: the list of fingerprint sources and the ticket-context code are shared between fetch and check.
+
 ## [1.4.0] - 2026-10-22
 
 ### Added
@@ -59,6 +74,7 @@ Every PR that changes plugin content (commands, agents, PDQC assets) must bump t
 - Approval is `/asdlc:plan approve`, not hand-editing `status: approved`.
 - The suggested `.gitignore` lines gain `plans/*/` (impact.md can quote code) and `plans/*.plan.prev.md` (an old plan), and `jira-setup.sh check` warns when they are missing. Add them to existing repos.
 
+[1.5.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.5.0
 [1.4.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.4.0
 [1.3.1]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.3.1
 [1.3.0]: https://github.com/mumerfarooq-con/asdlc-tools/releases/tag/asdlc--v1.3.0

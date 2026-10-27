@@ -11,7 +11,7 @@ Parse arguments:
 
 ## Preflight
 - GitHub mode: confirm `gh` is authenticated (`gh auth status`). If not, tell the user to run `gh auth login`, and offer local mode.
-- Bitbucket mode: confirm the Atlassian/Bitbucket MCP server is connected. If not, tell the user to run `/mcp`, and offer local mode.
+- Bitbucket mode: confirm the Atlassian/Bitbucket MCP server is connected (the server named by `ASDLC_BB_MCP_SERVER` in the user's environment; the Atlassian one by default if that is unset). If not, tell the user to run `/mcp`, and offer local mode.
 - Local mode: `git rev-parse --verify` the branch and base; try `origin/<branch>` after a fetch if missing; ask the user if still missing.
 
 ## Solo mode (default — cheap, for routine PRs)
