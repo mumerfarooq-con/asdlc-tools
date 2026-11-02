@@ -4,6 +4,8 @@
 # per-slice branch names, and the stale check before a later slice. Bitbucket answers come from
 # fixtures (the documented shape, not verified live); origin is a local bare repo.
 . "$(dirname "$0")/helpers.sh"
+# These gates refuse test modes unless this opt-in is set (SF-1); the refusal tests unset it with env -u.
+export ASDLC_TEST_FIXTURE_CHECK=1
 PS="$SHARED/plan-state.sh"; PA="$SHARED/plan-approve.sh"; RS="$S/run-state.sh"; JC="$S/jira-context.sh"
 URL="https://bitbucket.org/acme/widgets/pull-requests/7"
 
@@ -114,6 +116,8 @@ stamped PROJ-1 3 "$ROWS3"; stamped PROJ-2 3 ""
 assert_eq "$("$PS" get plans/PROJ-1.plan.md slice)" "1" "with a section"
 assert_eq "$(sed '1,/^-->/!d' plans/PROJ-2.plan.md | grep -c '^slice:')" "0" "without a section: no line"
 assert_eq "$(sed '1,/^-->/!d' plans/PROJ-1.plan.md | grep -c '^slice:')" "1" "exactly one line"
+stamped PROJ-4 2 '| <1> | <1-2> | <why this is its own PR> |'
+assert_eq "$(sed '1,/^-->/!d' plans/PROJ-4.plan.md | grep -c '^slice:')" "0" "a kept hint row only: no line (N-3)"
 
 t "the header is outside plan_hash: changing slice leaves the hash and the state alone"
 approved PROJ-1 3 "$ROWS3"
@@ -187,7 +191,11 @@ git_box() {
   mkdir -p plans; use_fixtures basic
   PRD="$SB/fx/bb/repositories/acme/widgets/pullrequests"; mkdir -p "$PRD"
 }
-pr_state() { printf '{"id":7,"state":"%s"}' "$1" > "$PRD/7.json"; }
+# pr_state <state> [source branch]: the PR's source branch defaults to PROJ-1's recorded branch (D-H9 check).
+pr_state() {
+  local b="${2-$("$PS" get plans/PROJ-1.plan.md branch 2>/dev/null)}"
+  jq -nc --arg s "$1" --arg b "$b" '{id:7,state:$s,source:{branch:{name:$b}}}' > "$PRD/7.json"
+}
 # waiting_plan <KEY>: approved, slice-1 branch created, slice-1 work logged, PR recorded, status waiting.
 waiting_plan() {
   approved "$1" 3 "$ROWS3"
@@ -237,7 +245,7 @@ run "$RS" start-branch plans/PROJ-1.plan.md "x"; assert_eq "$CODE/$OUT" "0/featu
 t "next-slice: slice 2 can wait again, and slice 3 branches as -s3"
 git checkout -q main; "$PS" set PROJ-1 status executing >/dev/null
 run "$PS" set PROJ-1 status waiting; assert_eq "$CODE" "0" "slice 2 of 3 can wait"
-"$PS" set PROJ-1 pr "$URL" >/dev/null
+"$PS" set PROJ-1 pr "$URL" >/dev/null; pr_state MERGED
 run "$RS" next-slice PROJ-1; assert_eq "$CODE" "0" "second advance (bare id)"
 assert_eq "$("$PS" get plans/PROJ-1.plan.md slice)" "3" "slice 3"
 git checkout -q main; run "$RS" start-branch plans/PROJ-1.plan.md "Add the thing"
@@ -330,7 +338,7 @@ sandbox; use_fixtures context; mkdir -p plans
 run "$JC" fetch PROJ-1 >/dev/null 2>&1
 approved PROJ-1 3 "$ROWS3"            # stamp picks up the fingerprint of the fetch
 assert_contains "$(sed -n '1,/^-->/p' plans/PROJ-1.plan.md)" "ticket_fingerprint: sha256:" "fingerprinted"
-PRD="$SB/fx/bb/repositories/acme/widgets/pullrequests"; mkdir -p "$PRD"; pr_state MERGED
+PRD="$SB/fx/bb/repositories/acme/widgets/pullrequests"; mkdir -p "$PRD"; "$PS" set PROJ-1 branch feature/PROJ-1-x >/dev/null; pr_state MERGED
 "$PS" set PROJ-1 pr "$URL" >/dev/null; "$PS" set PROJ-1 status executing >/dev/null; "$PS" set PROJ-1 status waiting >/dev/null
 run "$RS" next-slice PROJ-1; assert_eq "$CODE" "0" "advance"
 : > "$ASDLC_FIXTURE_LOG"
@@ -342,6 +350,25 @@ assert_eq "$CODE" "17" "exit"; assert_contains "$OUT" "STALE" "verdict"
 assert_eq "$("$PS" get plans/PROJ-1.plan.md status)" "stale" "the plan is stale, so slice 2 does not run"
 run "$PS" check PROJ-1; assert_eq "$OUT/$CODE" "STALE/17" "plan-state agrees"
 run "$RS" start-branch plans/PROJ-1.plan.md "x"; assert_eq "$CODE" "2" "start-branch refuses a stale plan"
+
+# ---- test modes are refused at the gate (SF-1) ---------------------------------------------------------
+t "next-slice: --fixtures, --conf and ASDLC_FIXTURES are refused without the opt-in, plan untouched"
+git_box; waiting_plan PROJ-1; pr_state MERGED; cp plans/PROJ-1.plan.md "$SB/before"
+run env -u ASDLC_TEST_FIXTURE_CHECK "$RS" next-slice plans/PROJ-1.plan.md --fixtures "$SB/fx"
+assert_eq "$CODE" "2" "--fixtures exit"; assert_contains "$ERR" "test modes" "reason"; untouched PROJ-1
+run env -u ASDLC_TEST_FIXTURE_CHECK "$RS" next-slice plans/PROJ-1.plan.md --conf "$SB/.asdlc/jira.conf"
+assert_eq "$CODE" "2" "--conf exit"; untouched PROJ-1
+run env -u ASDLC_TEST_FIXTURE_CHECK "$RS" next-slice plans/PROJ-1.plan.md
+assert_eq "$CODE" "2" "ASDLC_FIXTURES in the environment"; untouched PROJ-1
+run "$RS" next-slice plans/PROJ-1.plan.md; assert_eq "$CODE" "0" "with the opt-in it advances"
+
+t "next-slice: a MERGED PR from another branch is refused with exit 19, plan byte-identical"
+git_box; waiting_plan PROJ-1; cp plans/PROJ-1.plan.md "$SB/before"
+pr_state MERGED "feature/PROJ-9-other"
+run "$RS" next-slice plans/PROJ-1.plan.md; assert_eq "$CODE" "19" "other branch"; assert_contains "$ERR" "source branch" "reason"; untouched PROJ-1
+pr_state MERGED ""; run "$RS" next-slice plans/PROJ-1.plan.md; assert_eq "$CODE" "19" "empty source branch"; untouched PROJ-1
+printf '{"id":7,"state":"MERGED"}' > "$PRD/7.json"; run "$RS" next-slice plans/PROJ-1.plan.md; assert_eq "$CODE" "19" "no source branch field"; untouched PROJ-1
+pr_state MERGED; run "$RS" next-slice plans/PROJ-1.plan.md; assert_eq "$CODE" "0" "its own branch advances"
 
 # ---- the queue finds a slice PR's own report ------------------------------------------------------------
 t "review-queue: a plan on slice 2 reads plans/pr-review-<KEY>-s2.md, a plan on slice 1 reads pr-review-<KEY>.md"

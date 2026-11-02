@@ -97,11 +97,11 @@ asdlc_load_conf() {
 # arguments and load the config. Remaining arguments land in ASDLC_ARGS;
 # restore them with: set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
 asdlc_init() {
-  ASDLC_ARGS=()
+  ASDLC_ARGS=(); ASDLC_CONF_GIVEN=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --fixtures) ASDLC_FIXTURES="${2:?--fixtures needs a directory}"; shift 2 ;;
-      --conf)     ASDLC_JIRA_CONF="${2:?--conf needs a file}"; shift 2 ;;
+      --conf)     ASDLC_JIRA_CONF="${2:?--conf needs a file}"; ASDLC_CONF_GIVEN=1; shift 2 ;;
       *)          ASDLC_ARGS+=("$1"); shift ;;
     esac
   done
@@ -110,6 +110,19 @@ asdlc_init() {
     asdlc_die "fixtures directory not found: $ASDLC_FIXTURES"
   fi
   asdlc_load_conf
+}
+
+# Fixture mode (ASDLC_FIXTURES / --fixtures) and --conf are test transports. The gate scripts
+# (run-state.sh next-slice, review-queue.sh, bb-pr-comment.sh) refuse them unless the test
+# opt-in ASDLC_TEST_FIXTURE_CHECK=1 is set: next-slice and review-queue.sh are pre-approved
+# commands, and an inline env prefix does not match a pre-approved command prefix, so using
+# the opt-in prompts the user. Call after asdlc_init. Exits 2 with one line on stderr.
+asdlc_refuse_test_modes() {  # <what>
+  [ "${ASDLC_TEST_FIXTURE_CHECK:-}" = 1 ] && return 0
+  if [ -n "${ASDLC_FIXTURES:-}" ] || [ "${ASDLC_CONF_GIVEN:-0}" = 1 ]; then
+    echo "$1: refused: --fixtures and --conf are test modes, not for this gate (nothing was read or written)" >&2
+    exit 2
+  fi
 }
 
 # The Jira token is sent to JIRA_BASE_URL, and a committed config sets that, so

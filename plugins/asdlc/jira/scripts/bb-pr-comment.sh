@@ -12,6 +12,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 asdlc_init "$@"; set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
+asdlc_refuse_test_modes "bb-pr-comment.sh"
 MCP=""; RECORD=""; FILE=""; POS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -49,10 +50,11 @@ read_file_text() {  # <path> -> TEXT
   set +f
   IFS=$' \t\n'
   [ -f "$f" ] || file_refuse "'$f' is not a regular file"
-  size="$(wc -c < "$f" | tr -d ' ')"
+  # Read once, capped: a swap after a separate size check can't get past the limit.
+  TEXT="$(head -c 32769 < "$f"; printf x)"; TEXT="${TEXT%x}"
+  size="$(printf '%s' "$TEXT" | wc -c | tr -d ' ')"
   [ "$size" -gt 0 ] || file_refuse "'$f' is empty"
-  [ "$size" -le 32768 ] || file_refuse "'$f' is $size bytes (the limit is 32768)"
-  TEXT="$(cat "$f")"
+  [ "$size" -le 32768 ] || file_refuse "'$f' is over the limit of 32768 bytes"
 }
 if [ -n "$FILE" ]; then
   [ "${2:-}" = "" ] || { echo "--file and text are exclusive" >&2; exit 2; }

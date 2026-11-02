@@ -109,4 +109,20 @@ assert_contains "$(cat "$P/agents/pr-review-chair.md")" "At most 5 rows" "chair 
 assert_contains "$(cat "$P/agents/pr-reviewer.md")" "At most 5 rows" "solo reviewer names the 5-row cap"
 assert_contains "$(cat "$P/commands/review-pr.md")" "--id" "review-pr parses --id"
 
+t "a comma in a hunk path fails closed"
+printf '# R\n\n## Human must read\nRisk tier: high\n| # | Hunk | Reason | Why |\n|---|---|---|---|\n| 1 | app/a,b.py:1-2 | migration | x |\n' > "$SB/comma.md"
+run "$RR" must-read "$SB/comma.md"
+assert_eq "$CODE" "3" "exit"; assert_eq "$(printf '%s' "$OUT" | jq -r '.tier')" "high" "tier high"
+assert_contains "$(printf '%s' "$OUT" | jq -r '.warnings[0]')" "malformed hunk path" "warning"; assert_eq "$(printf '%s' "$OUT" | jq -c .rows)" "[]" "no rows"
+
+t "--diff: a rename into docs/ or tests/ does not hide the old path (skim is normal)"
+for dest in docs tests; do
+  sandbox
+  mkdir -p app; seq 1 30 > app/old.py; echo base > README.md; git add -A; git commit -qm base; git checkout -qb feature
+  mkdir -p "$dest"; git mv app/old.py "$dest/old.py"; git commit -qm "move into $dest"
+  run "$RR" must-read "$FX/skim-docs.md" --diff main feature
+  assert_eq "$(printf '%s' "$OUT" | jq -r '.tier')" "normal" "rename into $dest/"
+  assert_contains "$(printf '%s' "$OUT" | jq -r '.warnings[0]')" "not docs or tests" "warning for $dest/"
+done
+
 finish

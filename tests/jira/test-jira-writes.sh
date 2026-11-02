@@ -2,6 +2,8 @@
 # Scripts that write to Jira/Bitbucket: transition, notify, open PR, PR comment.
 # Writes are captured in the fixture request log, never sent.
 . "$(dirname "$0")/helpers.sh"
+# These gates refuse test modes unless this opt-in is set (SF-1); the refusal tests unset it with env -u.
+export ASDLC_TEST_FIXTURE_CHECK=1
 
 posts() { requests | jq -c '[.[] | select(.method == "POST")]'; }
 
@@ -322,5 +324,22 @@ assert_contains "$OUT" "Watchers added" "login ready"
 assert_eq "$(posts | jq -c '[.[] | select(.path | endswith("/watchers")) | .body]')" '["acc-1"]' "watchers over REST"
 assert_eq "$(posts | jq -c '[.[] | select(.path | endswith("/comment"))]')" "[]" "no comment over REST"
 
+
+t "PR comment: --fixtures and --conf are refused without the opt-in, nothing posted (SF-1)"
+sandbox; use_fixtures basic; : > "$ASDLC_FIXTURE_LOG"
+run env -u ASDLC_TEST_FIXTURE_CHECK "$S/bb-pr-comment.sh" --fixtures "$SB/fx" 7 "[asdlc] hi"
+assert_eq "$CODE" "2" "--fixtures exit"; assert_contains "$ERR" "test modes"; assert_eq "$(posts)" "[]" "no POST"
+run env -u ASDLC_TEST_FIXTURE_CHECK "$S/bb-pr-comment.sh" 7 "[asdlc] hi"
+assert_eq "$CODE" "2" "ASDLC_FIXTURES exit"; assert_eq "$(posts)" "[]" "no POST (env)"
+run env -u ASDLC_TEST_FIXTURE_CHECK -u ASDLC_FIXTURES "$S/bb-pr-comment.sh" --conf "$SB/.asdlc/jira.conf" 7 "[asdlc] hi"
+assert_eq "$CODE" "2" "--conf exit"; assert_contains "$ERR" "test modes"
+
+t "PR comment --file: a file over 32768 bytes is refused (read once, capped)"
+sandbox; use_fixtures basic; mkdir -p plans
+{ printf '[asdlc] big\n'; head -c 32800 /dev/zero | tr '\0' 'a'; } > plans/big.md
+run "$S/bb-pr-comment.sh" 7 --file plans/big.md; assert_eq "$CODE" "2" "over the limit"; assert_contains "$ERR" "32768"
+{ printf '[asdlc] ok\n'; head -c 32700 /dev/zero | tr '\0' 'a'; } > plans/ok.md
+run "$S/bb-pr-comment.sh" 7 --file plans/ok.md; assert_eq "$CODE" "0" "under the limit"
+: > plans/empty.md; run "$S/bb-pr-comment.sh" 7 --file plans/empty.md; assert_eq "$CODE" "2" "empty"
 
 finish

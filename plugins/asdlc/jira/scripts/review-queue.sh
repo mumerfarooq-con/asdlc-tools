@@ -36,6 +36,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 ASDLC_CONF_OPTIONAL=1 asdlc_init "$@"; set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
+asdlc_refuse_test_modes "review-queue.sh"   # a fixture directory must not empty the queue (D-H2)
 
 die2() { echo "review-queue: $*" >&2; exit 2; }
 PLANS="plans"; ALL=0

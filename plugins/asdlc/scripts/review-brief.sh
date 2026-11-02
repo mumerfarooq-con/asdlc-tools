@@ -15,6 +15,8 @@
 #       the required headings once each and in order, at most 150 lines and 12 KB, at most 5 rows under
 #       "Human must read". "tests" counts the lines containing "asserts" under "## Tests first".
 #       --rereview also requires `## Changed since your review at <short sha>` (last).
+#       A brief with a secret-like token shape (PEM private key header, AKIA, ghp_, github_pat_, xox[abprs]-, ATATT)
+#       is refused: `BRIEF invalid: <n> secret-like string(s)`, never the text.
 # Exit 2 = refusal or invalid brief, 1 = git failure.
 set -euo pipefail
 . "$(dirname "$0")/../jira/scripts/lib.sh"
@@ -107,6 +109,13 @@ cmd_check() {
   [[ $first =~ ^\[asdlc\]\ Reviewer\ brief\ —\ ([A-Z][A-Z0-9_]*-[0-9]+)\ at\ ([0-9a-f]{7,40})$ ]] \
     || invalid "first line is not '[asdlc] Reviewer brief — <KEY> at <short sha>'"
   [ "${BASH_REMATCH[1]}" = "$KEY" ] || invalid "first line names another ticket"
+  # Secret-like token shapes (N-5): the brief is posted to a PR. Counts only, never the text.
+  # No generic hex run: a brief cites commit shas.
+  local nsec
+  nsec="$(tr -d '\r' < "$f" | grep -Ec -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' -e 'AKIA[0-9A-Z]{16}' \
+    -e 'ghp_[A-Za-z0-9]{36}' -e 'github_pat_[A-Za-z0-9_]{22,}' -e 'xox[abprs]-[A-Za-z0-9-]{10,}' \
+    -e 'ATATT[A-Za-z0-9_=-]{20,}' || true)"
+  [ "${nsec:-0}" -eq 0 ] || invalid "$nsec secret-like string(s)"
   local want="Intent|Tests first|Human must read|Deviations from the plan|Out of scope|Reading order|Check on dev"
   [ "$rereview" -eq 0 ] || want="$want|Changed since your review at"
   # One awk pass: required headings once each, in order; rows under Human must read; asserts under Tests first.

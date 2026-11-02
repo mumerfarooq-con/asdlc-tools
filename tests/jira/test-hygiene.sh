@@ -320,4 +320,16 @@ assert_eq "$top" "$pv" "CHANGELOG top version equals plugin.json"
 assert_contains "$(cat "$P/jira/README.md")" "REVIEW_QUEUE_MAX" "the Jira guide documents the cap"
 assert_contains "$(cat "$P/commands/jira-setup.md")" "REVIEW_QUEUE_MAX" "jira-setup explains the cap"
 
+t "no command or agent pre-approves a bare git subcommand beyond the known ones"
+# A bare `Bash(git <sub>:*)` lets a model pass any option. Allowed: git status, git add (jira-run), git rev-parse (jira-setup).
+for f in "$P"/commands/*.md "$P"/agents/*.md; do
+  [ -f "$f" ] || continue
+  bare="$(sed -n '/^allowed-tools:/p;/^tools:/p' "$f" | grep -o 'Bash(git [a-z-]*:\*)' | grep -v -e 'Bash(git status:\*)' || true)"
+  case "$(basename "$f")" in
+    jira-run.md)   bare="$(printf '%s\n' "$bare" | grep -v -e 'Bash(git add:\*)' || true)" ;;
+    jira-setup.md) bare="$(printf '%s\n' "$bare" | grep -v -e 'Bash(git rev-parse:\*)' || true)" ;;
+  esac
+  assert_eq "$bare" "" "$(basename "$f") has no bare git pre-approval"
+done
+
 finish

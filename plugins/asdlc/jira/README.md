@@ -175,7 +175,7 @@ a new comment, an edited description or a new attachment does.
 Before running an approved plan, Phase A runs `jira-context.sh check <plan>`. It fetches the issue
 and its comments again (no parent body, no downloads; only GETs) and compares:
 
-| Result | Exit | Meaning |
+| `jira-context.sh check` result | Exit | Meaning |
 |---|---|---|
 | `FRESH` | 0 | The ticket is as it was. The plan runs. |
 | `STALE <summary>` | 17 | The ticket changed. The plan becomes `stale`, is copied to `<KEY>.plan.prev.md`, and `plans/<KEY>/changes.md` lists the change (new, edited or removed comment ids, a description diff of at most 200 lines, parent, link and attachment changes). A plan that `--reset-executing` restored also reports its recorded branch. |
@@ -414,7 +414,10 @@ Needs project-admin rights.
 ## Scripts (`scripts/`)
 All read `.asdlc/jira.conf` (or `--conf <file>`), and all Jira/Bitbucket scripts accept
 `--fixtures <dir>` to answer from saved JSON instead of the network (see `tests/jira/` in the
-plugin repo for the layout).
+plugin repo for the layout). Both are test modes for the gates: `jira-context.sh check`,
+`run-state.sh next-slice`, `review-queue.sh` and `bb-pr-comment.sh` refuse `--fixtures` (and the last
+three `--conf`) unless `ASDLC_TEST_FIXTURE_CHECK=1` is set, so local JSON can't pass a stale check,
+confirm a merge or empty the review queue.
 - `jira-mine.sh` — list tickets to plan (`--key/--sprint/--status/--any-status/--anyone`). It
   prints key, summary, status, priority, type and labels, never the description. Over MCP it lists up to
   40 tickets per run (the connector's cap) against 50 over REST, and it warns when there are more.

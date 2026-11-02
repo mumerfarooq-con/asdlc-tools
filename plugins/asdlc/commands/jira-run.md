@@ -34,7 +34,7 @@ below; run them from the repo root. They read the project's `.asdlc/jira.conf` a
   - The tool pre-approvals below name the default server (`claude_ai_Atlassian`); for another
     `mcp_server` I will be asked to approve the calls.
 - Take the run lock: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh lock`. It prints a run id: keep it as `<RUN_ID>`.
-  - Exit 10 means another run holds the lock. Show me the holder it names (who, since when) and
+  - `run-state.sh lock` exit 10 means another run holds the lock. Show me the holder it names (who, since when) and
     STOP. If I tell you that run crashed, I clear it myself, or I tell you to run
     `${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh force-unlock` — never run that on your own.
   - Always release the lock before you finish, including on error: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh unlock <RUN_ID>`.
@@ -49,10 +49,10 @@ below; run them from the repo root. They read the project's `.asdlc/jira.conf` a
 First the review queue, before any `start-branch`: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-queue.sh` (read-only; keep
 its output for the Report). It prints `QUEUE <waiting>/<max>` and one `PR <id> <KEY> ...` line per PR still waiting for my
 human review (`REVIEW_QUEUE_MAX`, default 3, 0 = no cap).
-- Exit 18 (at or over the cap) → execute NOTHING this run: the plans stay approved. Report "Review queue full
+- `review-queue.sh` exit 18 (at or over the cap) → execute NOTHING this run: the plans stay approved. Report "Review queue full
   (<w>/<max>): review these first — /asdlc:review-tour <PR>", one line per waiting PR, then go to Phase B.
-- Exit 2 → relay the message and skip Phase A (a bad `REVIEW_QUEUE_MAX` is mine to fix); Phase B still runs.
-- Exit 0 → carry on. Run `review-queue.sh` again after each PR you open (step 4): exit 18 → stop Phase A there, and report the
+- `review-queue.sh` exit 2 → relay the message and skip Phase A (a bad `REVIEW_QUEUE_MAX` is mine to fix); Phase B still runs.
+- `review-queue.sh` exit 0 → carry on. Run `review-queue.sh` again after each PR you open (step 4): exit 18 → stop Phase A there, and report the
   plans you did not run as "<KEY>: not run — review queue full".
 
 List plan files: `ls ./plans/*.plan.md`. For each, run
@@ -66,10 +66,10 @@ List plan files: `ls ./plans/*.plan.md`. For each, run
   empty → skip; report "<KEY>: slice <k> is done but has no PR recorded — open it, or re-stamp" (never open one yourself here).
   Otherwise run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh next-slice <plan>` (read-only against Bitbucket; it moves the plan
   on only if Bitbucket says that PR is MERGED, and never otherwise):
-  - exit 0 → the plan is on its next slice and `check` now prints `RUNNABLE`. Treat it as RUNNABLE from the top: `validate`, the
+  - `next-slice` exit 0 → the plan is on its next slice and `check` now prints `RUNNABLE`. Treat it as RUNNABLE from the top: `validate`, the
     stale check below (it runs before EVERY slice), then implement it (`<k>` = its new slice).
-  - exit 19 → skip; report "<KEY>: slice <k> PR not merged yet" (with the reason it printed).
-  - exit 11 → skip; report "<KEY>: plan edited since approval — re-approve". Any other exit → report what it says, next plan.
+  - `next-slice` exit 19 → skip; report "<KEY>: slice <k> PR not merged yet" (with the reason it printed).
+  - `next-slice` exit 11 → skip; report "<KEY>: plan edited since approval — re-approve". Any other exit → report what it says, next plan.
 - `EXECUTING` `PENDING` `DONE` `FAILED` `SKIP` `MISSING` → skip (mention EXECUTING/FAILED, stay quiet on the rest).
 
 Stale check, for each plan that is RUNNABLE and VALID, before anything else is done for it:
@@ -81,13 +81,13 @@ Stale check, for each plan that is RUNNABLE and VALID, before anything else is d
 - Then run
 `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh check <plan>`. It prints one verdict line, never ticket
 text. Never run a plan unless it is RUNNABLE, VALID and FRESH.
-- `FRESH` (exit 0) → implement it (steps below).
-- `STALE <summary>` (exit 17) → the plan is now `stale` and its `.prev` and `changes.md` exist. Do not
+- `jira-context.sh check` `FRESH` (exit 0) → implement it (steps below).
+- `jira-context.sh check` `STALE <summary>` (exit 17) → the plan is now `stale` and its `.prev` and `changes.md` exist. Do not
   run it. Report "<KEY>: ticket changed since approval — <summary>", adding the `branch: <name>` line if
   the check printed one (work was already done on it). Queue the plan for Phase B (under `--execute-only`
   it stays `stale` on disk and the next planning run re-plans it).
-- `UNCHECKED <reason>` (exit 21) → do not run it; report "<KEY>: not run — <reason>". The plan is untouched.
-- Exit 2 → do not run it; relay the message. A plan with no fingerprint (approved before 1.4.0, or not
+- `jira-context.sh check` `UNCHECKED <reason>` (exit 21) → do not run it; report "<KEY>: not run — <reason>". The plan is untouched.
+- `jira-context.sh check` exit 2 → do not run it; relay the message. A plan with no fingerprint (approved before 1.4.0, or not
   a Jira plan) is reported as "<KEY>: no ticket fingerprint — re-plan".
 
 To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field, read with `plan-state.sh get <plan> ticket`):
@@ -98,12 +98,12 @@ To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field,
    - A plan with no branch yet gets a new `feature/<KEY>-<slug>` (`feature/<KEY>-<slug>-s<k>` for slice 2 and later) off an up-to-date
      `<TARGET_BRANCH>`, recorded in the plan. A plan whose earlier run crashed resumes on the
      branch it recorded, with that run's work.
-   - Exit 12 (uncommitted changes outside the plan's own branch) → STOP Phase A and report it.
-   - Exit 13 (the branch exists but this plan didn't create it) or 14 (the plan's branch is gone)
+   - `start-branch` exit 12 (uncommitted changes outside the plan's own branch) → STOP Phase A and report it.
+   - `start-branch` exit 13 (the branch exists but this plan didn't create it) or 14 (the plan's branch is gone)
      → report what it says, next plan. Never delete, reset or reuse a branch yourself.
-   - Exit 15 (progress logged on a gone or cleared branch) → report it, next plan. The plan needs
+   - `start-branch` exit 15 (progress logged on a gone or cleared branch) → report it, next plan. The plan needs
      a re-stamp and my re-approval; never clear its log or branch yourself.
-   - Any other non-zero exit (2 refusal, 1 git failure) → report what it says, next plan.
+   - `start-branch`, any other non-zero exit (2 refusal, 1 git failure) → report what it says, next plan.
 2. Move the ticket to In Progress (see "Jira writes over MCP" below for the `mcp` form):
    `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh <KEY> :in-progress`
 3. Run `/asdlc:implement-prd <plan> --execute` (Skill tool). It re-runs the gate and itself sets the

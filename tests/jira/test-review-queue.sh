@@ -2,6 +2,8 @@
 # review-queue.sh: which of the plugin's own PRs still wait for a human review, and the cap.
 # Bitbucket answers come from fixtures (documented shapes, not verified live); origin is a local bare repo.
 . "$(dirname "$0")/helpers.sh"
+# These gates refuse test modes unless this opt-in is set (SF-1); the refusal tests unset it with env -u.
+export ASDLC_TEST_FIXTURE_CHECK=1
 Q="$S/review-queue.sh"; PS="$SHARED/plan-state.sh"; RR="$S/review-record.sh"
 RAW="https://bitbucket.org/acme/widgets/pull-requests"
 AUTHOR=aaaa-author; MATE=bbbb-mate
@@ -272,7 +274,7 @@ body="$(sed '1,/^---$/{/^---$/!d;}' "$JR")"
 qline="$(grep -n 'review-queue.sh`' "$JR" | head -1 | cut -d: -f1)"
 sline="$(grep -n 'run-state.sh start-branch' "$JR" | sed -n 2p | cut -d: -f1)"
 [ -n "$qline" ] && [ -n "$sline" ] && [ "$qline" -lt "$sline" ] && ok || nok "queue line $qline, start-branch line $sline"
-assert_contains "$(cat "$JR")" "Exit 18" "handles exit 18"
+assert_contains "$(cat "$JR")" '`review-queue.sh` exit 18' "handles the queue's exit 18"
 assert_contains "$(head -5 "$JR")" "review-queue.sh:*" "allowed-tools has the queue"
 assert_contains "$(head -5 "$JR")" "scripts/review-report.sh:*" "allowed-tools has the report reader"
 # Task 4 pre-approves only the read-only `last` (for the re-review delta), never `add` or a blanket.
@@ -282,5 +284,14 @@ assert_contains "$(cat "$JR")" "[asdlc] AI review (not a human review):" "AI sum
 assert_contains "$(cat "$JR")" "--id <KEY>" "review-pr gets --id"
 assert_contains "$(cat "$JR")" "AI-approved, awaiting your human review (tier <t>: <reasons>)" "D-H10 line"
 assert_not_contains "$(cat "$JR")" "approved, awaiting merge" "old line gone"
+
+t "refuses --fixtures, --conf and ASDLC_FIXTURES without the opt-in (SF-1): exit 2, no queue line"
+qbox; plan PROJ-1 7 >/dev/null 2>&1 || true
+run env -u ASDLC_TEST_FIXTURE_CHECK "$Q" --fixtures "$SB/fx"
+assert_eq "$CODE" "2" "--fixtures exit"; assert_contains "$ERR" "test modes"; assert_not_contains "$OUT" "QUEUE" "no queue line"
+run env -u ASDLC_TEST_FIXTURE_CHECK "$Q" --conf "$SB/.asdlc/jira.conf"
+assert_eq "$CODE" "2" "--conf exit"; assert_not_contains "$OUT" "QUEUE"
+run env -u ASDLC_TEST_FIXTURE_CHECK "$Q"
+assert_eq "$CODE" "2" "ASDLC_FIXTURES exit"; assert_not_contains "$OUT" "QUEUE"
 
 finish

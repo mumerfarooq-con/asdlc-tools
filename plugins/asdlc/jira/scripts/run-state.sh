@@ -29,6 +29,8 @@
 #   - Bitbucket REST (GET .../pullrequests/<id>) says the recorded PR is MERGED. Nothing else counts:
 #     no token, a failed call, OPEN, DECLINED, SUPERSEDED, or a PR that is not this repo's all exit 19.
 #     A merge is never inferred from git.
+#   - the PR's source branch (.source.branch.name, from the same GET) equals the plan's recorded `branch` (else exit 19).
+# --fixtures and --conf are refused (exit 2) unless ASDLC_TEST_FIXTURE_CHECK=1; see asdlc_refuse_test_modes in lib.sh.
 # Then, in one write: it appends `- slice <k>: <pr url> merged` under Progress, sets slice to k+1,
 # clears branch and pr, and sets status approved. start-branch then cuts a new branch from the target.
 #
@@ -230,6 +232,7 @@ case "$cmd" in
     echo "$branch"
     ;;
   next-slice)
+    asdlc_refuse_test_modes "run-state.sh next-slice"
     plan="${2:?usage: run-state.sh next-slice <plan>}"
     case "$plan" in
       */*|*.md) ;;
@@ -269,11 +272,17 @@ case "$cmd" in
     fi
     rm -f "$errf"
     pst="$(jq -r '.state // ""' <<<"$prj" 2>/dev/null)" || pst=""
+    psrc="$(jq -r '.source.branch.name // ""' <<<"$prj" 2>/dev/null)" || psrc=""
     case "$pst" in
       MERGED) ;;
       OPEN|DECLINED|SUPERSEDED) die 19 "slice $SL_CUR's PR $pid is $pst, not MERGED; the plan is untouched" ;;
       *) die 19 "Bitbucket gave no usable state for PR $pid, so its merge cannot be confirmed; the plan is untouched" ;;
     esac
+    # The PR must come from this plan's own branch: a stale pr URL of another merged PR must not pass.
+    pbr="$("$PS" get "$plan" branch)"
+    if [ -z "$psrc" ] || [ -z "$pbr" ] || [ "$psrc" != "$pbr" ]; then
+      die 19 "PR $pid's source branch is not this plan's recorded branch, so its merge cannot be confirmed for this slice; the plan is untouched"
+    fi
     rc=0
     restore_approved WAITING "- slice $SL_CUR: $url merged" "slice=$((SL_CUR + 1))" "branch=" "pr=" || rc=$?
     case "$rc" in

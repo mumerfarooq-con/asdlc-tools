@@ -124,7 +124,15 @@ assert_contains "$RT" "Never record a hunk the user did not answer" "tour: never
 assert_contains "$RT" "Never approve, decline or merge" "tour: never approves"
 assert_contains "$RT" "local-only" "tour: local-only scope"
 assert_contains "$RT" "not the working tree" "tour: shows the head version, not the checkout"
-assert_contains "$RTA" "git grep:*" "tour: git grep is allowed (numbered head version)"
+assert_contains "$RTA" "scripts/tour-git.sh:*" "tour: the read-only git wrapper is allowed"
+assert_not_contains "$RTA" "Bash(git " "tour: no bare git pre-approved"
+assert_not_contains "$RTA" "review-queue.sh" "tour: review-queue.sh is not pre-approved"
+assert_contains "$RT" "tour-git.sh show <branch> <path>" "tour: the head version comes from the wrapper"
+assert_contains "$RT" "tour-git.sh changed <last> <branch>" "tour: the re-review filter uses the wrapper"
+assert_contains "$RT" "plans/pr-review-<ID>.md" "tour: reads the report by its id"
+assert_contains "$RT" "<KEY>-s<k>" "tour: a later slice has its own report id"
+assert_contains "$RT" "plan-state.sh get <plan> slice" "tour: reads the slice"
+assert_contains "$RT" "<file>:<start>-<end>" "tour: hunks are built from the JSON row"
 assert_contains "$RT" "one command per Bash call" "tour: no compound commands"
 assert_contains "$RT" "scripts/plan-state.sh get <plan> pr" "tour: plan-state.sh has its path"
 assert_contains "$RT" "ask once whether I mean an" "tour: a non-answer is asked about, not checked"
@@ -134,6 +142,17 @@ for f in "$ROOT"/plugins/asdlc/commands/*.md "$ROOT"/plugins/asdlc/agents/*.md "
   if grep -q -e '--record' "$f"; then nok "$f mentions --record"; else ok; fi
   if grep -v -i 'never' "$f" | grep -q 'review-record.sh add'; then nok "$f calls review-record.sh add"; else ok; fi
   if sed -n '/^allowed-tools:/p;/^tools:/p' "$f" | grep -q 'review-record.sh add'; then nok "$f allows review-record.sh add"; else ok; fi
+done
+
+t "round trip: every must-read row built as <file>:<start>-<end> is recorded and read back"
+sandbox
+for rep in high normal; do
+  hunks=()
+  while IFS= read -r h; do hunks+=("$h"); done < <("$SHARED/review-report.sh" must-read "$FIXTURES/review-report/$rep.md" | jq -r '.rows[] | "\(.file):\(.start)-\(.end)"')
+  [ "${#hunks[@]}" -gt 0 ] && ok || nok "$rep.md has no rows"
+  run "$RR" add PROJ-1 7 "$SHA1" "${hunks[@]}"; assert_eq "$CODE" "0" "$rep.md: add accepts the rows"
+  assert_eq "$(head -1 plans/PROJ-1/human-review.comment.md | "$RR" parse-comment)" "$SHA1" "$rep.md: parse-comment reads it back"
+  assert_eq "$(tail -n1 plans/PROJ-1/human-review.jsonl | jq -c .hunks)" "$(printf '%s\n' "${hunks[@]}" | jq -R . | jq -sc .)" "$rep.md: hunks recorded as built"
 done
 
 t "usage"

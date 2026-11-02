@@ -166,4 +166,20 @@ assert_contains "$JR" "--since" "re-review delta"
 assert_not_contains "$(printf '%s\n' "$JR" | grep -v '^allowed-tools:' | grep -iE '(^|[^a-z])read[^a-z]' | grep -E 'review-brief|review\.diff' | grep -vE 'Never|never' || true)" "review" "no instruction to Read the brief or diff"
 assert_contains "$(cat "$P/scripts/review-brief.sh")" "git rev-parse --verify --quiet --end-of-options" "refs resolved safely"
 
+t "check: a secret-like token is refused by shape, counted, and never printed (N-5)"
+tok_bad() {  # <label> <planted text>
+  mkbrief PROJ-1 x; printf '%s\n' "$2" >> plans/PROJ-1/review-brief.md
+  run "$RB" check PROJ-1
+  assert_eq "$CODE" "2" "$1 exit"; assert_contains "$OUT" "BRIEF invalid: 1 secret-like string(s)" "$1"
+  assert_not_contains "$OUT$ERR" "$3" "$1 not echoed"
+}
+tok_bad "private key" "-----BEGIN RSA PRIVATE KEY-----" "BEGIN RSA"
+tok_bad "AWS key" "key AKIAABCDEFGHIJKLMNOP here" "AKIAABCDEF"
+tok_bad "ghp" "tok ghp_$(printf 'a%.0s' $(seq 1 36))" "ghp_aaaa"
+tok_bad "github_pat" "tok github_pat_$(printf 'B%.0s' $(seq 1 30))" "github_pat_BBBB"
+tok_bad "slack" "tok xoxb-1234567890-abcdef" "xoxb-1234"
+tok_bad "atlassian" "tok ATATT$(printf 'c%.0s' $(seq 1 30))" "ATATTcccc"
+mkbrief PROJ-1 x; printf 'see commit 0123456789abcdef0123456789abcdef01234567\n' >> plans/PROJ-1/review-brief.md
+run "$RB" check PROJ-1; assert_eq "$CODE" "0" "a commit sha is not a secret"
+
 finish

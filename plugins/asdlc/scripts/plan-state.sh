@@ -143,9 +143,12 @@ case "$cmd" in
       printf 'status: pending\n'
       printf 'plan_hash: sha256:%s\n' "$h"
       if [ -n "$fp_lines" ]; then printf '%s\n' "$fp_lines"; fi
-      # Only a plan that has a "## PR slices" section gets the field; any other plan's header is
-      # byte-identical to a pre-1.6.0 one, and no line reads as slice 1.
-      if [ "$(approved_part < "$btmp" | grep -ciE '^##[ \t]+PR slices[ \t\r]*$' || true)" -gt 0 ]; then printf 'slice: 1\n'; fi
+      # Only a plan whose "## PR slices" section holds at least one slice row (slices_part prints
+      # one line per slice) gets the field. A plan with no section, or one that keeps only the
+      # template's hint row, gets none: its header is byte-identical to a pre-1.6.0 one, and no
+      # line reads as slice 1.
+      sl_rows="$(approved_part < "$btmp" | slices_part 2>/dev/null || true)"
+      if [ -n "$sl_rows" ]; then printf 'slice: 1\n'; fi
       printf 'branch:\n'; printf 'pr:\n'
       printf 'updated: %s\n' "$now"
       printf '%s\n' '-->'

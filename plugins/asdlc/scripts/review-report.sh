@@ -93,6 +93,8 @@ EOT
   case "$file" in -*|/*) fail "row $nrows: malformed hunk path" ;; esac
   case "/$file/" in */../*|*/./*|*//*) fail "row $nrows: malformed hunk path" ;; esac
   [[ $file =~ [[:cntrl:]] ]] && fail "row $nrows: malformed hunk path"
+  # A comma would split the path in a record's hunk list (review-record.sh add takes a comma list).
+  case "$file" in *,*) fail "row $nrows: malformed hunk path" ;; esac
   [ "$start" -ge 1 ] && [ "$end" -ge "$start" ] || fail "row $nrows: malformed hunk range"
   case "$REASONS" in *" $reason "*) ;; *) fail "row $nrows: unknown reason" ;; esac
   if [ "$reason" != other ]; then
@@ -120,7 +122,7 @@ if [ "$tier" = skim ] && [ "$want_diff" -eq 1 ]; then
   not_skim=""
   mb=""; files=""
   if mb="$(git merge-base "$base" "$head" 2>/dev/null)" \
-     && files="$(git diff --name-only "$mb" "$head" 2>/dev/null)"; then
+     && files="$(git diff --name-only --no-renames "$mb" "$head" 2>/dev/null)"; then
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       case "$f" in
