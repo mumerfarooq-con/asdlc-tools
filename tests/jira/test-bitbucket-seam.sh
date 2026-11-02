@@ -39,7 +39,7 @@ ASDLC_BB_MCP_SERVER=nosuch run "$OPEN" --mcp-args feature/x "Add x"
 assert_eq "$CODE" "2" "no profile"; assert_contains "$ERR" "no Bitbucket MCP profile 'nosuch'"; assert_contains "$ERR" "BB_TRANSPORT=rest"
 ASDLC_BB_MCP_SERVER=test run "$OPEN" --mcp-args feature/x "Add x"
 assert_eq "$CODE" "2" "test profile without the allowance"; assert_contains "$ERR" "for tests only"
-ASDLC_BB_MCP_SERVER=test run "$CMT" --mcp-args 7 "hi"; assert_eq "$CODE" "2" "comment: same"
+ASDLC_BB_MCP_SERVER=test run "$CMT" --mcp-args 7 "[asdlc] hi"; assert_eq "$CODE" "2" "comment: same"
 ASDLC_BB_MCP_SERVER=test run "$OPEN" --from-mcp; assert_eq "$CODE" "1" "from-mcp: same"; assert_contains "$ERR" "for tests only"
 ASDLC_BB_MCP_SERVER='a b' run "$OPEN" --mcp-args feature/x "Add x"; assert_eq "$CODE" "2" "server name shape"
 [ ! -e plans ] && ok || nok "no request was opened by a refused call"
@@ -123,20 +123,32 @@ mkcap cap-1-e.json "$nonce" "$OT" $((created + 2)) "{\"id\":\"5\",\"url\":\"$URL
 run "$OPEN" --from-mcp; assert_eq "$CODE/$OUT" "0/5 $URL" "the valid one"
 "$OPEN" --mcp-args feature/x "Add x" >/dev/null; jq '.expires_epoch = 1' $req > r.tmp && mv r.tmp $req
 run "$OPEN" --from-mcp; assert_eq "$CODE" "1" "expired"; assert_contains "$ERR" "expired"
-"$CMT" --mcp-args 7 "hi" >/dev/null; run "$OPEN" --from-mcp; assert_eq "$CODE" "1" "a comment request is not an open_pr request"; assert_contains "$ERR" "is for pr_comment"
+"$CMT" --mcp-args 7 "[asdlc] hi" >/dev/null; run "$OPEN" --from-mcp; assert_eq "$CODE" "1" "a comment request is not an open_pr request"; assert_contains "$ERR" "is for pr_comment"
 
 t "pr_comment: --mcp-args, capture and --from-mcp"
 sandbox 'BB_TRANSPORT=mcp'; use_test_profile
-run "$CMT" --mcp-args 7 "looks good"
+run "$CMT" --mcp-args 7 "[asdlc] looks good"
 assert_eq "$CODE" "0" "exit"; assert_eq "$(printf '%s' "$OUT" | jq -r '.tool')" "$CT" "tool"
-assert_eq "$(printf '%s' "$OUT" | jq -c '.args')" '{"workspace":"acme","repo_slug":"widgets","pull_request_id":"7","content":"looks good"}' "args"
-run "$CMT" --mcp-args 7 <<<"from stdin"; assert_contains "$OUT" '"content":"from stdin' "text from stdin"
-run "$CMT" --mcp-args 7x "hi"; assert_eq "$CODE" "2" "pr id must be a number"
-"$CMT" --mcp-args 7 "looks good" >/dev/null
+assert_eq "$(printf '%s' "$OUT" | jq -c '.args')" '{"workspace":"acme","repo_slug":"widgets","pull_request_id":"7","content":"[asdlc] looks good"}' "args"
+run "$CMT" --mcp-args 7 <<<"[asdlc] from stdin"; assert_contains "$OUT" '"content":"[asdlc] from stdin' "text from stdin"
+run "$CMT" --mcp-args 7x "[asdlc] hi"; assert_eq "$CODE" "2" "pr id must be a number"
+"$CMT" --mcp-args 7 "[asdlc] looks good" >/dev/null
 run "$CMT" --from-mcp 7; assert_eq "$CODE" "1" "no capture"
 bbhook "$(hook_in "$CT" "$(reqargs)" '{"id": 501, "links": {"html": {"href": "https://bitbucket.example.test/c/501"}}}')"
 assert_contains "$(receipt)" "(id 501)" "receipt"
 run "$CMT" --from-mcp 7; assert_eq "$CODE/$OUT" "0/Posted comment to PR 7" "the REST contract line"
 run "$CMT" --from-mcp 7; assert_eq "$CODE" "1" "use once"
+
+t "pr_comment over MCP: the marker rule, --record and --file shape the request text"
+sandbox 'BB_TRANSPORT=mcp'; use_test_profile
+run "$CMT" --mcp-args 7 "unmarked"; assert_eq "$CODE" "2" "unmarked"; assert_eq "$OUT" "" "no request printed"
+assert_eq "$([ -e plans/.mcp/bb/request.json ] && echo open || echo none)" "none" "no request opened"
+REC="[asdlc] Human review: hunks a.py:1-2 at 0123456789abcdef0123456789abcdef01234567"
+run "$CMT" --mcp-args 7 "$REC"; assert_eq "$CODE" "2" "record without --record"
+run "$CMT" --mcp-args 7 --record "$REC"; assert_eq "$CODE" "0" "record with --record"; assert_contains "$OUT" "Human review: hunks a.py:1-2" "text in the request"
+mkdir -p plans/PROJ-1; printf '[asdlc] Reviewer brief — PROJ-1 at abc1234\nline2\n' > plans/PROJ-1/review-brief.md
+run "$CMT" --mcp-args 7 --file plans/PROJ-1/review-brief.md
+assert_eq "$CODE" "0" "--file"; assert_eq "$(printf '%s' "$OUT" | jq -r '.args.content')" "$(printf '[asdlc] Reviewer brief — PROJ-1 at abc1234\nline2')" "file text in the request"
+ln -s review-brief.md plans/PROJ-1/l.md; run "$CMT" --mcp-args 7 --file plans/PROJ-1/l.md; assert_eq "$CODE" "2" "symlink refused"
 
 finish

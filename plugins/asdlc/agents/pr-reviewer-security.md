@@ -30,6 +30,7 @@ Severity: BLOCKER / MAJOR / MINOR. Each finding: `file:line — issue — why it
 Write `./plans/pr-review-<id-or-slug>.security.md`:
 1. `LENS VERDICT: BLOCK` (any BLOCKER) / `CONCERNS` (MAJOR/MINOR only) / `CLEAR`
 2. Findings by severity (security only)
-3. One-line scope note: what you examined.
+3. `## Human-must-read candidates` — up to 5 rows from your lens (migrations, authz changes, deletes, IAM), as `| # | Hunk | Reason | Why a human must read it |` with Hunk `path:start-end` and Reason one of migration, authz, irreversible, billing, infra, concurrency, api-contract, env-config, other. Prefer the hunk where a mistake would escape tests. No tier; the chair decides it.
+4. One-line scope note: what you examined.
 
 Chat reply: verdict + finding counts + report path, ≤ 8 lines. Report only real security issues — do not invent findings to look thorough, and do not stray outside the lens.

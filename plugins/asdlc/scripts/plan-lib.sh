@@ -66,6 +66,15 @@ hdr_count() {  # <file> <field>: how many header lines carry this field
   awk -v k="$2:" '/^-->[ \t]*$/ {exit} $1==k {n++} END {print n+0}' "$1"
 }
 
+# The slice header: absent (an older plan: slice 1) or exactly one whole number 1..999.
+slice_hdr_ok() {
+  local n v; n="$(hdr_count "$plan" slice)"
+  [ "$n" -eq 0 ] && return 0
+  [ "$n" -eq 1 ] || return 1
+  v="$(hdr_get "$plan" slice)"
+  re_ok "$v" '^[1-9][0-9]{0,2}$'
+}
+
 # Shared by check, set and reset-executing so they cannot disagree about the state.
 # Sets STATE, STATE_CODE, STATE_MSG (stderr text, may be empty), CUR_HASH, STORED_HASH.
 compute_state() {
@@ -75,9 +84,15 @@ compute_state() {
   # The fingerprint fields are read by the stale check, so a second line is tampering too.
   if [ "$(hdr_count "$plan" status)" -gt 1 ] || [ "$(hdr_count "$plan" plan_hash)" -gt 1 ] \
      || [ "$(hdr_count "$plan" ticket_fingerprint)" -gt 1 ] || [ "$(hdr_count "$plan" fingerprint_at)" -gt 1 ] \
-     || [ "$(hdr_count "$plan" fingerprint_source)" -gt 1 ]; then
+     || [ "$(hdr_count "$plan" fingerprint_source)" -gt 1 ] || [ "$(hdr_count "$plan" slice)" -gt 1 ]; then
     STATE=EDITED; STATE_CODE=11
     STATE_MSG="  duplicate header field — re-stamp and re-approve"
+    return 0
+  fi
+  # slice picks which approved tasks run next, so a value that is not a plain number is tampering.
+  if ! slice_hdr_ok; then
+    STATE=EDITED; STATE_CODE=11
+    STATE_MSG="  the slice header is not a whole number from 1 to 999 — re-stamp and re-approve"
     return 0
   fi
   # A second progress line could move part of the approved plan out of the hash.
@@ -97,6 +112,7 @@ compute_state() {
               fi ;;
     pending)       STATE=PENDING;   STATE_CODE=10 ;;
     executing)     STATE=EXECUTING; STATE_CODE=12 ;;
+    waiting)       STATE=WAITING;   STATE_CODE=21 ;;
     done)          STATE=DONE;      STATE_CODE=13 ;;
     failed)        STATE=FAILED;    STATE_CODE=14 ;;
     skip|rejected) STATE=SKIP;      STATE_CODE=15 ;;
@@ -138,6 +154,36 @@ write_field() {  # <field> <val>
     inb && $1==ENVIRON["K"] {print ENVIRON["K"] " " ENVIRON["V"]; next}
     inb && $1=="updated:" {print "updated: " ENVIRON["NOW"]; next}
     {print}
+  ' "$plan" > "$otmp"
+  mv "$otmp" "$plan"
+}
+
+# The ONLY two scripted paths back to "approved", and both are compare-and-set on the hash the
+# human approved: plan-state.sh reset-executing (executing -> approved, a crashed run) and
+# run-state.sh next-slice (waiting -> approved, once the slice's PR is merged). The status moves
+# only if the plan is in the expected state AND its approved part still hashes to the stored
+# plan_hash, so no approval is ever created here: a new hash is approved by plan-approve.sh alone.
+# tests/jira/test-hygiene.sh pins this: no other file may write "status approved" or call this.
+# One atomic rewrite: status=approved, "updated", the extra header fields, and one optional line
+# appended to the end of the file (the run log, below the progress line, outside the hash).
+# Usage: restore_approved <expected STATE> <log line or ""> [field=value ...]
+# Returns 0; 2 the plan is not in the expected state; 11 the approved part changed (nothing written).
+restore_approved() {
+  local want="$1" logl="$2" now e edits=""; shift 2
+  compute_state
+  [ "$STATE" = "$want" ] || return 2
+  [ -n "$CUR_HASH" ] && [ "$CUR_HASH" = "$STORED_HASH" ] || return 11
+  for e in "$@"; do edits="$edits$e"$'\n'; done
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; otmp="$(mktemp)"
+  EDITS="status=approved"$'\n'"$edits" LOGL="$logl" NOW="$now" awk '
+    BEGIN { n = split(ENVIRON["EDITS"], L, "\n")
+            for (i = 1; i <= n; i++) { if (L[i] == "") continue; p = index(L[i], "="); k = substr(L[i], 1, p - 1); V[k] = substr(L[i], p + 1); want[k] = 1 } }
+    NR==1 {inb=1; print; next}
+    inb && /^-->[ \t]*$/ { for (k in want) if (!(k in seen)) print k ": " V[k]; inb=0; print; next }
+    inb && $1=="updated:" {print "updated: " ENVIRON["NOW"]; next}
+    inb { k = $1; sub(/:$/, "", k); if ((k in want) && $1 == k ":") { print k ": " V[k]; seen[k]=1; next } }
+    {print}
+    END { if (ENVIRON["LOGL"] != "") print ENVIRON["LOGL"] }
   ' "$plan" > "$otmp"
   mv "$otmp" "$plan"
 }
@@ -258,6 +304,116 @@ validate_part() {
     }'
 }
 
+# The "## PR slices" section of the approved part on stdin (item 7, D-H9). No section, or only
+# the template's hint row: prints nothing and succeeds (the plan is one slice). Otherwise it checks
+#   - at most 3 rows, numbered 1..n in order in the Slice column;
+#   - the Tasks cell is a list like "1, 2" or "1-2" or "1-2, 4" (a range is first-last, inclusive);
+#   - every "### Task <n>" of Changes is in exactly one slice, and every listed task exists;
+#   - all of slice k's tasks come before slice k+1's in the Changes order.
+# One stderr line per problem, each starting "PR slices:". On success prints one line per slice,
+# "<k> <task numbers in Changes order>", and exits 0; exits 1 on any problem.
+slices_part() {
+  awk '
+    function trim(s) { gsub(/^[ \t\r]+/, "", s); gsub(/[ \t\r]+$/, "", s); return s }
+    function problem(msg) { print "PR slices: " msg > "/dev/stderr"; bad++ }
+    function posof(n,   i) { for (i = 1; i <= nt; i++) if (T[i] == n) return i; return 0 }
+    function addtask(k, t) {
+      if (!(t in TC)) { problem("slice " k " lists task " t ", which has no \"### Task " t "\" heading in Changes"); return }
+      own[t]++
+      if (own[t] == 2) problem("task " t " is in more than one slice (or listed twice)")
+      if (!(t in first)) first[t] = k
+      mem[k, t] = 1
+    }
+    {
+      line = $0
+      if (incom) { if (index(line, "-->")) incom = 0; next }
+      if (line ~ /^[ \t]*<!--/) { if (!index(line, "-->")) incom = 1; next }
+      if (line ~ /^##[ \t]+[^#]/) {
+        name = tolower(trim(substr(line, 3)))
+        sec = ""
+        if (name == "changes") sec = "c"
+        else if (name == "pr slices") { sec = "s"; nsec++ }
+        tbl = 0; next
+      }
+      if (sec == "c") {
+        if (tolower(line) ~ /^###[ \t]+task[ \t]+[0-9]+/) {
+          s = line; sub(/^###[ \t]+[A-Za-z]+[ \t]+/, "", s); match(s, /^[0-9]+/)
+          n = substr(s, 1, RLENGTH) + 0
+          if (n in TC) problem("\"### Task " n "\" appears more than once in Changes")
+          TC[n] = 1; T[++nt] = n
+        }
+        next
+      }
+      if (sec != "s") next
+      if (trim(line) == "") { tbl = 0; next }
+      if (line !~ /^[ \t]*\|/) { tbl = 0; next }
+      gsub(/\\\|/, "\001", line); sub(/\|[ \t\r]*$/, "", line)
+      tbl++
+      if (tbl == 1) next
+      if (line ~ /^[ \t]*\|[ \t\r:|-]+$/ && line ~ /-/) next
+      n = split(line, C, "|"); allph = 1
+      for (i = 2; i <= n; i++) { c = trim(C[i]); if (c != "" && c !~ /^<.*>$/) allph = 0 }
+      if (allph) next
+      rows++
+      cs = trim(C[2]); ct = trim(C[3])
+      if (n < 3) { problem("row " rows ": needs a Slice cell and a Tasks cell"); next }
+      if (cs !~ /^[0-9]+$/ || cs + 0 != rows) problem("row " rows ": the Slice cell must be " rows " (slices are numbered 1..n in order), not \"" cs "\"")
+      gsub(/[ \t]/, "", ct)
+      if (ct == "") { problem("slice " rows " has no tasks"); next }
+      np = split(ct, P, ",")
+      for (i = 1; i <= np; i++) {
+        p = P[i]
+        if (p ~ /^[0-9]+$/) addtask(rows, p + 0)
+        else if (p ~ /^[0-9]+-[0-9]+$/) {
+          a = p; sub(/-.*/, "", a); b = p; sub(/^[0-9]+-/, "", b); a += 0; b += 0
+          if (b < a) problem("slice " rows ": the range \"" p "\" runs backwards")
+          else if (b - a > 500) problem("slice " rows ": the range \"" p "\" is too long")
+          else for (t = a; t <= b; t++) addtask(rows, t)
+        } else problem("slice " rows ": \"" p "\" in the Tasks cell is not a task number or a range like 1-2")
+      }
+    }
+    END {
+      if (nsec > 1) problem("more than one \"## PR slices\" heading")
+      if (rows > 0) {
+        if (rows > 3) problem("at most 3 slices, found " rows)
+        for (i = 1; i <= nt; i++) if (own[T[i]] + 0 == 0) problem("task " T[i] " is in no slice")
+        for (k = 1; k < rows; k++) {
+          mx = 0; mn = 0
+          for (i = 1; i <= nt; i++) {
+            if (mem[k, T[i]]) mx = i
+            if (mem[k + 1, T[i]] && (mn == 0 || i < mn)) mn = i
+          }
+          if (mx > 0 && mn > 0 && mx > mn) problem("slice " (k + 1) " has a task (" T[mn] ") ahead of a task of slice " k " (" T[mx] ") in the Changes order")
+        }
+        if (!bad) for (k = 1; k <= rows; k++) {
+          o = k
+          for (i = 1; i <= nt; i++) if (mem[k, T[i]]) o = o " " T[i]
+          print o
+        }
+      }
+      exit (bad > 0)
+    }'
+}
+
+# The current slice of the plan. Sets SL_CUR, SL_N (slices in the approved part, 1 with no section)
+# and SL_TASKS (a comma list for the current slice, or "all" with no section). Returns 1 with a
+# stderr line if the section is invalid, the header slice is malformed, or it is past the last slice.
+slice_info() {
+  local out cur
+  out="$(body_of "$plan" | approved_part | slices_part)" || return 1
+  slice_hdr_ok || { echo "the slice header is not a whole number from 1 to 999" >&2; return 1; }
+  cur="$(hdr_get "$plan" slice)"; [ -n "$cur" ] || cur=1
+  SL_CUR=$((10#$cur)); SL_TASKS=all; SL_N=1
+  if [ -n "$out" ]; then
+    SL_N="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+    if [ "$SL_CUR" -gt "$SL_N" ]; then echo "the plan is on slice $SL_CUR but has only $SL_N slice(s)" >&2; return 1; fi
+    SL_TASKS="$(printf '%s\n' "$out" | awk -v k="$SL_CUR" '$1 == k { $1 = ""; sub(/^ /, ""); gsub(/ /, ","); print }')"
+  elif [ "$SL_CUR" -gt 1 ]; then
+    echo "the plan is on slice $SL_CUR but has no slices section" >&2; return 1
+  fi
+  return 0
+}
+
 # VALID (0) or INVALID (20) on stdout; the problems go to stderr. Checks only the approved part.
 do_validate() {
   local id="" has=0 rc=0
@@ -265,6 +421,7 @@ do_validate() {
   [ -n "$id" ] || id="$(basename "$plan" .plan.md)"
   if ! has_eol "$id" && re_ok "$id" '^[A-Za-z0-9][A-Za-z0-9._-]*$' && [ -f "plans/$id/impact.md" ]; then has=1; fi
   body_of "$plan" | approved_part | validate_part "$has" || rc=$?
+  body_of "$plan" | approved_part | slices_part >/dev/null || rc=$?
   if [ "$rc" -eq 0 ]; then echo VALID; return 0; fi
   echo INVALID; return 20
 }

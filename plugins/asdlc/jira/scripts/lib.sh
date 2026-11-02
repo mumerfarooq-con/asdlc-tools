@@ -19,7 +19,7 @@ NOTIFY_ACCOUNT_IDS TEMPLATE_BUG_TYPES TICKET_CHECK_MODE PIPELINE_COMMENT_MARKER
 LINK_BLOCKER_TYPES LINK_DUPLICATE_TYPES SENSITIVE_TOPICS
 ACCESS_RULES_PATH KNOWN_TRAPS_PATH IMPACT_EXTRA_PATHS IMPACT_EXCLUDE
 MAX_IMAGES MAX_IMAGE_MB REVIEW_COUNCIL_FILES REVIEW_COUNCIL_LINES REVIEW_COUNCIL_PATHS
-JIRA_TRANSPORT BB_TRANSPORT"
+REVIEW_QUEUE_MAX JIRA_TRANSPORT BB_TRANSPORT"
 
 # Defaults: generic values only. Project values (site, keys, branch) have none.
 asdlc_conf_defaults() {
@@ -35,7 +35,7 @@ asdlc_conf_defaults() {
   IMPACT_EXTRA_PATHS=""; IMPACT_EXCLUDE=".git,node_modules,.venv"
   MAX_IMAGES="10"; MAX_IMAGE_MB="5"
   JIRA_TRANSPORT="auto"; BB_TRANSPORT="rest"
-  REVIEW_COUNCIL_FILES="10"; REVIEW_COUNCIL_LINES="400"
+  REVIEW_COUNCIL_FILES="10"; REVIEW_COUNCIL_LINES="400"; REVIEW_QUEUE_MAX="3"
   REVIEW_COUNCIL_PATHS='(migration|migrations|auth|security|secret|credential|password|payment|billing|Dockerfile|\.github/|\.asdlc/|terraform|helm|k8s|deploy|infra)'
 }
 
@@ -200,6 +200,12 @@ asdlc_http() {
   printf '%s' "${code:-000}"
 }
 
+# Every PR comment the plugin posts starts with this marker; a human-review record has its own
+# prefix, which only /asdlc:review-tour may post (bb-pr-comment.sh --record). Fixed, not config:
+# the review queue finds records by it.
+ASDLC_PR_MARKER='[asdlc] '
+ASDLC_HR_PREFIX='[asdlc] Human review:'
+
 # Jira issue keys, and the marker that tags the pipeline's own comments.
 asdlc_is_key() { [[ ${1:-} =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; }
 asdlc_need_marker() {
@@ -252,17 +258,20 @@ asdlc_download() {
 # line to $ASDLC_FIXTURE_LOG when that is set, so tests can assert on calls.
 asdlc_fixture_http() {
   local svc="$1" method="$2" path="$3" out="$4"; shift 4
-  local start="" data="" a prev=""
+  local start="" data="" a prev="" pg=0
   for a in "$@"; do
     case "$a" in startAt=*) start="${a#startAt=}" ;; esac
     case "$prev" in -d|--data|--data-raw|--data-binary) data="$a" ;; esac
     prev="$a"
   done
   case "$path" in *\?*startAt=*) start="${path##*startAt=}"; start="${start%%&*}" ;; esac
+  # Bitbucket pages with ?page=N (the "next" link): <path>.page-<n>.json, same idea as startAt.
+  case "$path" in *\?page=*|*\&page=*) start="${path##*page=}"; start="${start%%&*}"; pg=1 ;; esac
   local base="$ASDLC_FIXTURES/$svc${path%%\?*}" file code
   if [ "$method" = "GET" ]; then
     file="$base.json"
-    if [ -n "$start" ] && [ "$start" != "0" ]; then file="$base.startAt-$start.json"; fi
+    if [ -n "$start" ] && [ "$start" != "0" ] && [ "$pg" = 0 ]; then file="$base.startAt-$start.json"; fi
+    if [ "$pg" = 1 ] && [ "$start" != "1" ]; then file="$base.page-$start.json"; fi
   else
     file="$base.$method.json"
   fi

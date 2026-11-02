@@ -41,6 +41,12 @@
 - <Tests: <tests to add or run>>
 - <Risk: <what could break>>
 
+## PR slices
+<OPTIONAL: delete this whole section for a small change (no section = one PR). Otherwise at most 3 rows, one PR each, merged one after the other: migrations first, behaviour next, follow-ups last. The Tasks cell lists task numbers from Changes: "1, 2", a range "1-2", or both "1-2, 4". Every task is in exactly one slice, and slice 2's tasks come after slice 1's.>
+| Slice | Tasks | Why separate |
+|---|---|---|
+| <1> | <1-2> | <why this is its own PR> |
+
 ## Tests
 <Tests to add or run for the whole plan; they must cover every "Must still work" item.>
 

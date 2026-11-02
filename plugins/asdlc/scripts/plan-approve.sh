@@ -36,7 +36,7 @@ case "$STATE" in
   EDITED) if [ "$(hdr_get "$plan" status)" = approved ] && [ "$(hdr_count "$plan" status)" -eq 1 ] \
              && [ "$(hdr_count "$plan" plan_hash)" -eq 1 ] && [ "$(progress_count "$plan")" -le 1 ] \
              && [ "$(hdr_count "$plan" ticket_fingerprint)" -le 1 ] && [ "$(hdr_count "$plan" fingerprint_at)" -le 1 ] \
-             && [ "$(hdr_count "$plan" fingerprint_source)" -le 1 ]; then can=1; fi ;;
+             && [ "$(hdr_count "$plan" fingerprint_source)" -le 1 ] && slice_hdr_ok; then can=1; fi ;;
   MISSING) die 16 "no header block in $plan — run 'plan-state.sh stamp' first" ;;
 esac
 [ "$can" -eq 1 ] || die 2 "refusing: $plan is $STATE; approve needs a pending, needs-info or blocked plan, or an approved plan the human edited"

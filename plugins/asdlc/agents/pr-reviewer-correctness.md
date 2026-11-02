@@ -30,6 +30,7 @@ Severity: BLOCKER (wrong results, data corruption, or untested critical path) / 
 Write `./plans/pr-review-<id-or-slug>.correctness.md`:
 1. `LENS VERDICT: BLOCK / CONCERNS / CLEAR`
 2. Findings by severity (correctness/testing only)
-3. One-line scope note (incl. whether you ran tests and the result).
+3. `## Human-must-read candidates` — up to 5 rows from your lens (locks/concurrency, irreversible operations, billing math), as `| # | Hunk | Reason | Why a human must read it |` with Hunk `path:start-end` and Reason one of migration, authz, irreversible, billing, infra, concurrency, api-contract, env-config, other. Prefer the hunk where a mistake would escape tests. No tier; the chair decides it.
+4. One-line scope note (incl. whether you ran tests and the result).
 
 Chat reply: verdict + counts + path, ≤ 8 lines. Prefer concrete reproducing inputs over vague worries. Do not stray outside the lens.

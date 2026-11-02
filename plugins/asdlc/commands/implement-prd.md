@@ -1,7 +1,7 @@
 ---
 description: Orchestrate PRD implementation (plan → execute → review → test), plan only and stop for file-based approval, execute an approved plan, or run a retrospective review of an already-completed PRD
 argument-hint: <path-to-prd | path-to-plan> [--plan-only | --execute | --review-only]
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh slice:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh:*)
 ---
 
 You are orchestrating work for: $ARGUMENTS
@@ -84,16 +84,22 @@ in step 5; every other change to it is the planner's.
    `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate <plan>`.
    - `check` prints `RUNNABLE` AND `validate` prints `VALID` → go to step 2.
    - Anything else → report it and STOP. `check` can print `PENDING` `EDITED` `STALE` `NEEDS_INFO`
-     `BLOCKED` `EXECUTING` `DONE` `FAILED` `SKIP` `MISSING`. On `INVALID`, relay the problems and say
+     `BLOCKED` `EXECUTING` `WAITING` `DONE` `FAILED` `SKIP` `MISSING`. `WAITING` means an earlier slice's PR is still open: after it
+     merges, `run-state.sh next-slice <plan>` (or `/asdlc:jira-run`) moves the plan to its next slice. On `INVALID`, relay the problems and say
      the plan was written before 1.3.0 or is incomplete, and must be re-planned (`/asdlc:plan replan <ID>`,
      then `--plan-only`). Never implement a plan that is not RUNNABLE and VALID.
    - If `plan-state.sh get <plan> ticket_fingerprint` prints a value, warn the user, without stopping:
      "this plan records a ticket fingerprint and no stale check ran; use `/asdlc:jira-run` to check
      the ticket first." Then continue.
+   - Run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh slice <plan>`. It prints `SLICE <k>/<n> tasks <list|all>`: the slice
+     to run now (`all` = the plan has no `## PR slices` section, so every task). Keep `<k>`, `<n>` and the task list.
+     A non-zero exit → report it and STOP.
 2. **Start:** run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status executing`.
    This command owns that transition, so the caller never sets it first. If it refuses, report why and STOP.
 3. **Execute → Review → Test loop** — exactly as in Pipeline mode step 2, against this plan, with
-   three rules for stamped plans:
+   four rules for stamped plans:
+   - Run only the tasks of the current slice (the list from step 1). Tasks of a later slice are never started
+     in this run, even when they look independent: each slice is its own branch and PR, merged first.
    - The tasks are only those above the plan's `<!-- asdlc:progress -->` line. The Progress section
      below it is the run's log, never a source of work. The subagents log there, not in the tasks.
    - Entries have exactly the form `- Task <n>: <ROLE> <VERDICT> — <note>`. Resuming after a
@@ -103,7 +109,10 @@ in step 5; every other change to it is the planner's.
      work in place.
    - The log only ever describes the plan's recorded branch: a re-stamp clears it, and
      `run-state.sh start-branch` refuses to cut a fresh branch for a plan whose log has entries.
-4. **Wrap up** — exactly as in Pipeline mode step 3.
+4. **Wrap up** — exactly as in Pipeline mode step 3, for this slice's tasks. Leave the status `executing`, as before,
+   and say "slice <k> of <n>" in the summary. The caller opens this slice's PR and only then sets the status:
+   `waiting` when a later slice exists (`plan-state.sh set <plan> status waiting`), `done` after the last slice.
+   Never set `waiting` here: a crash before the PR exists must stay a resumable `executing` plan.
 
 ## Retrospective mode (--review-only, already-completed PRD)
 

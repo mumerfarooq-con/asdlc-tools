@@ -47,5 +47,21 @@ Write report to `./plans/pr-review-<id-or-branch-slug>.md`:
 3. Findings grouped by severity — formatted so each can be pasted directly as a PR comment (self-contained, file:line at the start)
 4. Positive observations
 5. Questions for the author (genuine ambiguities, not rhetorical nits)
+6. `## Human must read` — always present, see below.
+
+## Human must read
+You decide the tier yourself. `scripts/review-report.sh must-read` parses it; keep the format exact:
+```
+## Human must read
+Risk tier: high | normal | skim
+| # | Hunk | Reason | Why a human must read it |
+|---|---|---|---|
+| 1 | path/to/file.py:40-58 | migration | <one line> |
+```
+- At most 5 rows. Hunk is `path:start-end`. Reason is one of `migration`, `authz`, `irreversible`, `billing`, `infra`, `concurrency`, `api-contract`, `env-config`, `other`.
+- Qualifies: migrations, authz/permissions, deletes and irreversible operations, billing, IAM/infra, locks/concurrency, API contract changes (including FE-facing response shapes and field names), environment config (domains, CORS, mail, URLs). Prefer the hunk where a mistake would escape tests.
+- Tier `high` if any row has a reason other than `other`; `normal` if every row is `other`; `skim` only when the change is docs-only or tests-only: then no rows, and one line `Skim OK: docs-only` or `Skim OK: tests-only`.
+- For `high`, add one line suggesting a teammate's approval on Bitbucket.
+- The "why" is one line in your own words; never paste PR text, ticket text or secrets into it.
 
 Chat reply to caller: verdict, finding counts by severity, report path, top 3 issues. ≤ 15 lines. Never approve with unresolved BLOCKERs; never pad with invented nits to look thorough.

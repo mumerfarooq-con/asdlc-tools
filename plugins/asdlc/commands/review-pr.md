@@ -1,12 +1,13 @@
 ---
 description: Review a PR (GitHub or Bitbucket) — single reviewer by default, or a 3-panelist council with --council
-argument-hint: <pr-number | pr-url | branch> [base-branch] [--council]
+argument-hint: <pr-number | pr-url | branch> [base-branch] [--council] [--id <name>]
 ---
 
 You are coordinating a PR review for: $ARGUMENTS
 
 Parse arguments:
 - A GitHub URL → **GitHub mode**. A Bitbucket URL → **Bitbucket mode**. A bare number → detect the provider from `git remote get-url origin` (github.com → GitHub mode, bitbucket.org → Bitbucket mode; ask the user if neither). A branch name → **local mode** (second token = base branch, defaulting to the repo's default branch).
+- `--id <name>` (`[A-Za-z0-9._-]+`; refuse anything else) → use `<name>` as the id/slug in every report path below and pass it to each agent. Without it, the id or slug is the PR number or branch slug, as before.
 - `--council` present → **Council mode** (3 panelists + chair). Absent → **Solo mode** (single `pr-reviewer`).
 
 ## Preflight
@@ -16,7 +17,7 @@ Parse arguments:
 
 ## Solo mode (default — cheap, for routine PRs)
 1. Invoke `pr-reviewer` with the PR id/URL and provider mode, or branch + base.
-2. Relay verdict, severity counts, report path.
+2. Relay verdict, severity counts, report path and the risk tier from its `## Human must read` section.
 3. Continue to "Handle verdict".
 
 ## Council mode (--council — for critical / high-risk PRs)
@@ -26,7 +27,7 @@ Parse arguments:
    - `pr-reviewer-correctness`
    Each writes its own lens report to `./plans/pr-review-<id-or-slug>.<lens>.md`. Do not review code yourself.
 2. After all three return, invoke `pr-review-chair` with the same id/slug. The chair reads the three reports, reconciles them, and writes the canonical `./plans/pr-review-<id-or-slug>.md`.
-3. Relay the chair's authoritative verdict, must-fix count, canonical report path, top 3 must-fixes.
+3. Relay the chair's authoritative verdict, must-fix count, canonical report path, top 3 must-fixes and the risk tier from its `## Human must read` section.
 4. Continue to "Handle verdict" using the CHAIR's verdict (panelist verdicts are inputs, not the decision).
 
 ## Handle verdict

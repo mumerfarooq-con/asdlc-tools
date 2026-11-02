@@ -85,18 +85,85 @@ assert_eq "$(posts | jq -r '.[0].body.destination.branch.name')" "release" "expl
 
 t "PR comment from an argument or stdin"
 : > "$ASDLC_FIXTURE_LOG"
-run "$S/bb-pr-comment.sh" 7 "LGTM"
+run "$S/bb-pr-comment.sh" 7 "[asdlc] LGTM"
 assert_eq "$OUT" "Posted comment to PR 7"
-assert_eq "$(posts | jq -c '.[0] | [.path, .body]')" '["/repositories/acme/widgets/pullrequests/7/comments",{"content":{"raw":"LGTM"}}]'
+assert_eq "$(posts | jq -c '.[0] | [.path, .body]')" '["/repositories/acme/widgets/pullrequests/7/comments",{"content":{"raw":"[asdlc] LGTM"}}]'
 : > "$ASDLC_FIXTURE_LOG"
-printf 'multi\nline' | "$S/bb-pr-comment.sh" 7 >/dev/null
-assert_eq "$(posts | jq -r '.[0].body.content.raw')" "$(printf 'multi\nline')" "stdin"
+printf '[asdlc] multi\nline' | "$S/bb-pr-comment.sh" 7 >/dev/null
+assert_eq "$(posts | jq -r '.[0].body.content.raw')" "$(printf '[asdlc] multi\nline')" "stdin"
+
+t "PR comment: the marker rule (D-H5), judged on the first line, text never echoed"
+sandbox; use_fixtures basic
+: > "$ASDLC_FIXTURE_LOG"
+for bad in "LGTM" " [asdlc] leading space" "[asdlc]no space" "[ASDLC] shouty" "$(printf 'ok first\n[asdlc] second line')"; do
+  run "$S/bb-pr-comment.sh" 7 "$bad"
+  assert_eq "$CODE" "2" "unmarked: $(printf '%s' "$bad" | head -1)"; assert_contains "$ERR" 'must start with "[asdlc] "' "reason"
+  assert_eq "$OUT" "" "nothing on stdout"; assert_not_contains "$ERR" "LGTM" "text not echoed"
+done
+run "$S/bb-pr-comment.sh" 7 < /dev/null; assert_eq "$CODE" "2" "empty stdin is unmarked"
+assert_eq "$(posts)" "[]" "no POST for any refusal"
+run "$S/bb-pr-comment.sh" 7 "[asdlc] AI review (not a human review): APPROVE"; assert_eq "$CODE" "0" "a marked summary"
+run "$S/bb-pr-comment.sh" 7 "[asdlc] Reviewer brief — PROJ-1 at abc1234"; assert_eq "$CODE" "0" "a marked brief"
+
+t "PR comment: a human-review record needs --record"
+: > "$ASDLC_FIXTURE_LOG"
+REC="[asdlc] Human review: hunks a.py:1-2 at 0123456789abcdef0123456789abcdef01234567"
+run "$S/bb-pr-comment.sh" 7 "$REC"
+assert_eq "$CODE" "2" "without --record"; assert_contains "$ERR" "--record"; assert_eq "$(posts)" "[]" "no POST"
+run "$S/bb-pr-comment.sh" 7 "[asdlc] Human review:x"; assert_eq "$CODE" "2" "prefix alone"
+run "$S/bb-pr-comment.sh" 7 --record "$REC"
+assert_eq "$CODE/$OUT" "0/Posted comment to PR 7" "with --record"
+assert_eq "$(posts | jq -r '.[0].body.content.raw')" "$REC" "posted as given"
+run "$S/bb-pr-comment.sh" 7 --record "plain"; assert_eq "$CODE" "2" "--record does not waive the marker"
+run "$S/bb-pr-comment.sh" 7 "[asdlc] mentions Human review: later"; assert_eq "$CODE" "0" "only the prefix is reserved"
+
+t "PR comment --file: reads a regular file under plans/"
+sandbox; use_fixtures basic
+mkdir -p plans/PROJ-1; printf '[asdlc] Reviewer brief — PROJ-1 at abc1234\n\nbody line\n' > plans/PROJ-1/review-brief.md
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/review-brief.md
+assert_eq "$CODE/$OUT" "0/Posted comment to PR 7" "relative"
+assert_eq "$(posts | jq -r '.[0].body.content.raw')" "$(printf '[asdlc] Reviewer brief — PROJ-1 at abc1234\n\nbody line')" "file text posted"
+assert_not_contains "$OUT$ERR" "body line" "text never printed"
+run "$S/bb-pr-comment.sh" --file "$SB/plans/PROJ-1/review-brief.md" 7; assert_eq "$CODE" "0" "absolute path under plans/, flags first"
+printf 'no marker\n' > plans/PROJ-1/bad.md
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/bad.md; assert_eq "$CODE" "2" "the marker rule applies to a file"
+printf '%s\n' "$REC" > plans/PROJ-1/rec.md
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/rec.md; assert_eq "$CODE" "2" "record file without --record"
+run "$S/bb-pr-comment.sh" 7 --record --file plans/PROJ-1/rec.md; assert_eq "$CODE" "0" "record file with --record"
+run "$S/bb-pr-comment.sh" 7 --file; assert_eq "$CODE" "2" "--file needs a path"
+run "$S/bb-pr-comment.sh" 7 "[asdlc] x" --file plans/PROJ-1/review-brief.md; assert_eq "$CODE" "2" "text and --file"
+
+t "PR comment --file refusals: symlink, outside plans/, empty, too large (nothing posted)"
+: > "$ASDLC_FIXTURE_LOG"
+ln -s review-brief.md plans/PROJ-1/link.md
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/link.md; assert_eq "$CODE" "2" "symlinked file"; assert_contains "$ERR" "symlink"
+mkdir -p real; printf '[asdlc] x\n' > real/f.md; ln -s ../real plans/PROJ-2
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-2/f.md; assert_eq "$CODE" "2" "symlinked directory"; assert_contains "$ERR" "symlink"
+# A glob-like part is checked as written, not glob-expanded (expansion is relative to the cwd, so an
+# x here would turn the symlinked plans/[x] into plans/x and skip its check).
+mkdir -p x; ln -s ../real "plans/[x]"
+run "$S/bb-pr-comment.sh" 7 --file 'plans/[x]/f.md'; assert_eq "$CODE" "2" "glob-named symlinked directory"; assert_contains "$ERR" "symlink"
+printf '[asdlc] x\n' > outside.md
+run "$S/bb-pr-comment.sh" 7 --file outside.md; assert_eq "$CODE" "2" "outside plans/"; assert_contains "$ERR" "outside plans/"
+run "$S/bb-pr-comment.sh" 7 --file "$SB/outside.md"; assert_eq "$CODE" "2" "absolute outside plans/"
+run "$S/bb-pr-comment.sh" 7 --file /etc/hostname; assert_eq "$CODE" "2" "absolute elsewhere"
+run "$S/bb-pr-comment.sh" 7 --file plans/../outside.md; assert_eq "$CODE" "2" "dot-dot"; assert_contains "$ERR" "plain path"
+run "$S/bb-pr-comment.sh" 7 --file plans//PROJ-1/review-brief.md; assert_eq "$CODE" "2" "double slash"
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1; assert_eq "$CODE" "2" "a directory"
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/missing.md; assert_eq "$CODE" "2" "missing"
+: > plans/PROJ-1/empty.md
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/empty.md; assert_eq "$CODE" "2" "empty"; assert_contains "$ERR" "empty"
+{ printf '[asdlc] big\n'; head -c 32768 /dev/zero | tr '\0' 'a'; } > plans/PROJ-1/big.md
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/big.md; assert_eq "$CODE" "2" "over 32 KB"; assert_contains "$ERR" "limit"
+{ printf '[asdlc] '; head -c 32760 /dev/zero | tr '\0' 'a'; } > plans/PROJ-1/edge.md
+run "$S/bb-pr-comment.sh" 7 --file plans/PROJ-1/edge.md; assert_eq "$CODE" "0" "exactly 32768 bytes"
+assert_eq "$(posts | jq 'length')" "1" "only the edge file was posted"
 
 t "failed write exits non-zero with the service's message"
 mkdir -p fx/bb/repositories/acme/widgets/pullrequests/7
 echo 401 > fx/bb/repositories/acme/widgets/pullrequests/7/comments.POST.code
 echo '{"error":{"message":"Token is invalid"}}' > fx/bb/repositories/acme/widgets/pullrequests/7/comments.POST.json
-run "$S/bb-pr-comment.sh" 7 "x"
+run "$S/bb-pr-comment.sh" 7 "[asdlc] x"
 assert_eq "$CODE" "1" "exit"; assert_contains "$ERR" "Bitbucket returned HTTP 401"
 assert_contains "$ERR" "Token is invalid"; assert_contains "$ERR" "BB_AUTH=basic"
 

@@ -310,6 +310,101 @@ Progress line changed.
 Finding a sprint ID: a bare number in `--sprint N` is the sprint's internal ID, not the board
 label. List IDs with `jira-sprints.sh`, or pass the exact name in quotes.
 
+## Human review
+AI review is not a human review, and with tickets running in parallel it is easy to skim the PR
+description and the review summary and skip the code. These pieces make the human read the code, or
+make skipping it visible. None of them blocks a merge: jira-run never merges.
+
+### The review queue and `REVIEW_QUEUE_MAX`
+`review-queue.sh` counts the PRs this plugin opened (every plan with a recorded Bitbucket `pr`
+in `BB_WORKSPACE`/`BB_REPO`), not every PR you authored. A PR is **waiting** when it is open (or its
+state is unknown), has no human-review record at its current head commit, and no participant other
+than its author has approved it on Bitbucket. It leaves the queue when it is merged or declined, when
+a human-review record matches its head, or when a teammate approves.
+
+`REVIEW_QUEUE_MAX` (config, default `3`, whole number, `0` turns the cap off) is how many may wait.
+At or above it, `review-queue.sh` exits **18**, and `/asdlc:jira-run` Phase A executes nothing: plans
+stay `approved`, the report lists the waiting PRs, and Phase B still plans. The queue is checked
+before the first branch is cut and again after every PR a run opens, so one run never overshoots. A
+bad value is refused (exit 2), not defaulted. Every run prints the queue (`QUEUE <waiting>/<max>`, then one
+line per waiting PR with its state, record, teammate approval, risk tier and reasons; never a PR
+title or ticket text).
+
+- **PRs opened by earlier versions count too**, from the first run, if their plan still records a `pr`.
+- **The gone-branch rule.** PRs are opened with `close_source_branch`, so the queue lists origin once
+  (`git ls-remote --heads origin`) and treats a PR whose branch is gone as closed, with no Bitbucket
+  call. A PR whose branch was deleted while it is still open on Bitbucket therefore leaves the queue
+  (it cannot be merged anyway).
+- **Fail closed.** If neither Bitbucket nor git can tell a PR's state, it counts as waiting, with the
+  reason on stderr. Without a Bitbucket token the queue still works from git, but cannot see a
+  teammate's approval or a record posted from another machine, so a Bitbucket token is recommended.
+- **What it reads from Bitbucket** (GETs only): the PR (`state`, `source.commit.hash`, which is a
+  short hash, `author.account_id`, `participants[].approved` and `participants[].user.account_id`)
+  and its comments (`content.raw`, `created_on`, `deleted`, `next`; at most 5 pages of 50, newest
+  record wins). These are the documented shapes and **have not been verified against a live
+  workspace yet**. Check `review-queue.sh --all` against a merged PR of your own before relying on it.
+
+### Must-read list, risk tier and brief
+Every review report (council chair or solo reviewer) has a `## Human must read` section: a risk tier
+(`high`, `normal`, `skim`) and at most 5 hunks, each with a reason from `migration`, `authz`,
+`irreversible`, `billing`, `infra`, `concurrency`, `api-contract`, `env-config`, `other`.
+`scripts/review-report.sh must-read <report> [--diff <base> <head>]` reads it as JSON and never prints
+the free-text "why". It fails closed (exit 3, tier `high`) on a missing section, more than 5 rows, an
+unknown reason, a malformed hunk or a tier the rows contradict. A `skim` claim is checked against
+the changed paths and becomes `normal` if any is not docs or tests. For a `high` tier the report
+suggests a teammate's approval on Bitbucket; jira-run's final line per PR is
+`<KEY> — <PR_URL> — AI-approved, awaiting your human review (tier <t>: <reasons>)`.
+
+After an AI APPROVE, the `review-brief` agent writes `plans/<KEY>/review-brief.md` from the plan,
+`context.md`, the report and `plans/<KEY>/review.diff`. `scripts/review-brief.sh diff` writes the diff
+(capped at 200 KB) and `check` validates the brief's shape and prints counts only. jira-run never reads
+the brief or the diff (they carry ticket text); it posts the brief as the first PR comment and then
+the AI summary, each after you confirm. With a human-review record, the brief covers only the changes
+since the last reviewed commit.
+
+`review-pr --id <name>` names the report `plans/pr-review-<name>*.md`. jira-run passes `--id <KEY>`
+(`<KEY>-s<n>` for slice n above 1), which is how the queue, the brief and the tour find the report.
+
+### Comment markers
+Every PR comment the plugin posts starts with `[asdlc] `, and `bb-pr-comment.sh` refuses (exit 2)
+text whose first line does not. The markers:
+- `[asdlc] ` — the general prefix.
+- `[asdlc] AI review (not a human review):` — the AI summary.
+- `[asdlc] Reviewer brief` — the brief (`[asdlc] Reviewer brief — <KEY> at <short sha>`).
+- `[asdlc] Human review: hunks <file:start-end>, ... at <sha>` — a human-review record. It is
+  refused unless `bb-pr-comment.sh` is given `--record`, which only `/asdlc:review-tour` passes.
+
+`bb-pr-comment.sh --file plans/<path>` posts the text of a regular file under `plans/` (no symlinks,
+not empty, at most 32 KB). The text is never printed. Every comment is still shown to you and
+confirmed before it is posted.
+
+### The human-review record and its trust model
+`/asdlc:review-tour` walks you through the must-read hunks, one behaviour question each, and writes
+a record only for the hunks you answered: a line in `plans/<KEY>/human-review.jsonl` and, for a
+Bitbucket PR and with your confirmation, the `[asdlc] Human review:` comment. For a GitHub PR or a
+local branch the record stays local (a branch with no PR records PR `0`; with no plan nothing is
+recorded). The record is an **honesty aid, not a security control**: a model with shell access could
+write the same line or post the same comment, and nothing here proves a person read anything.
+What it gives you is a visible, checkable claim that leaves the queue only when it names the PR's
+current head commit; a new push makes it stale. Compare the trust model of the stale check above.
+
+### PR slices
+A plan may split its Changes into at most 3 sequential PR slices (`## PR slices`; migrations first).
+One approval covers every slice. jira-run runs one slice per branch and PR (slice n above 1 is
+`feature/<KEY>-<slug>-s<n>`), checks the ticket is not stale before each, and sets the plan to
+`waiting` after the PR of a slice that has later slices. `plan-state.sh check` prints `WAITING` (exit 21).
+`run-state.sh next-slice <plan>` moves a `waiting` plan on only when Bitbucket REST says its PR is
+`MERGED`. A merge is never inferred from git, so it needs a Bitbucket token. Otherwise it changes
+nothing and exits **19** with the reason (no token, REST failure, still open, declined, no PR recorded).
+The move is a compare-and-set on the hash you approved, like `reset-executing` (exit 11 if the approved
+part changed); it logs `slice <k>: <url> merged` under Progress, bumps `slice` in the header, clears
+`branch` and `pr`, and sets the plan back to `approved`. That is the second scripted path back to
+`approved`, covered by the approval you already gave; nothing else creates an approval. A plan
+without `## PR slices` is one slice and works exactly as before. The queue counts each slice's PR on its own.
+
+New exit codes: `review-queue.sh` 18 (cap reached), `run-state.sh next-slice` 19 (merge not
+confirmed), `plan-state.sh check` 21 for `WAITING`.
+
 ## Merge → Testing
 The ticket moves to `STATUS_TESTING` only when the PR is **merged**, via Jira automation:
 project automation → "Pull request merged" trigger → transition to Testing + a comment that
@@ -328,13 +423,17 @@ plugin repo for the layout).
 - `ticket-to-prd.sh` — **deprecated**, `jira-run` no longer uses it. One ticket → `./prds/<KEY>.md`
   (description only; no comments, parent or images).
 - `run-state.sh` — run lock and recovery: `lock | unlock <run-id> | status | force-unlock |
-  reset-executing | list | start-branch <plan> <summary>`.
-- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing | validate | replan | progress`. It
+  reset-executing | list | start-branch <plan> <summary> | next-slice <plan>`.
+- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing | validate | replan | progress | slice`. It
   lives in the plugin's shared `scripts/`, because `/asdlc:implement-prd` uses it outside Jira too.
 - `plan-approve.sh` — approval, split out of `plan-state.sh`. Human-only: reached only through
   `/asdlc:plan approve`, never pre-approved. Refuses invalid, edited and STALE plans.
 - `impact-scan.sh` — the planner's repo search (see Impact scan above); also in the plugin's shared `scripts/`.
-- `bb-open-pr.sh`, `bb-pr-comment.sh` — open a PR, comment on it.
+- `bb-open-pr.sh`, `bb-pr-comment.sh` — open a PR, comment on it (marker rule, `--file`, `--record`).
+- `review-queue.sh` — the review queue (see Human review). `review-record.sh` — `add | last | parse-comment`,
+  the human-review record store; no network.
+- `review-brief.sh` — `diff | check` for the reviewer brief. `review-report.sh` (shared `scripts/`) —
+  `must-read` reads a report's Human must read section.
 - `review-mode.sh` — council vs solo from the PR diff (files/lines/sensitive paths).
 - `jira-transition.sh` — move a ticket by status name, or `:todo :in-progress :testing :needs-info`.
   If the ticket is already there it does nothing and exits 0, so a re-run doesn't fail.
@@ -353,3 +452,5 @@ KEY, not its display name — JQL accepts either.
 - Council review is ~4x solo. It's chosen by `review-mode.sh` from the actual diff — tune with
   `REVIEW_COUNCIL_FILES` (default 10), `REVIEW_COUNCIL_LINES` (default 400), and
   `REVIEW_COUNCIL_PATHS` (regex of paths that always force council).
+- `REVIEW_QUEUE_MAX` (default 3, `0` = off) caps how many of the plugin's own PRs may wait for a human
+  review before a run stops executing (exit 18 from `review-queue.sh`; see Human review).

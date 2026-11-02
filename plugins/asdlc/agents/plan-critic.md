@@ -24,6 +24,7 @@ The caller gives you paths only: the plan, the PRD (ticket, usually its `context
 8. A suggested approach is not followed without a verdict checked against the code.
 9. Access tracing: if a value grants or denies access, find every check that reads it, in any module (services, views, permission classes, proxies, serializers). Search the code yourself with Grep; do not trust the plan's table. Any reader the plan does not handle is a finding.
 10. If `changes.md` was given: every change it lists (comments, description, parent, links, attachments) is either handled by the plan or explicitly ruled out in it. An unhandled change is a finding.
+11. PR slices: if the plan has a `## PR slices` section, a slice that holds both a schema or data migration and a behaviour change is a `should-fix` (the migration belongs alone in an earlier slice). A plan with no section needs no slices unless it is large, in which case say so as a `note`.
 
 ## Severity
 - `blocker`: following the plan would break something that must still work, or leave an access path unhandled.

@@ -19,6 +19,7 @@ This repository is both the plugin source and its marketplace.
 - [Install](#install)
 - [Quick start](#quick-start)
 - [How approval works](#how-approval-works)
+- [Human review](#human-review)
 - [Subagents](#subagents)
 - [Examples](#examples)
 - [Troubleshooting](#troubleshooting)
@@ -33,6 +34,7 @@ This repository is both the plugin source and its marketplace.
 | `/asdlc:jira-run` | **Jira leg.** Runs every plan you have approved (implement, open a Bitbucket PR, review, fix), then plans your new tickets and stops for approval. Flags: `--key`, `--sprint`, `--status`, `--plan-only`, `--execute-only`, `--reset-executing`. |
 | `/asdlc:jira-setup` | One-time setup for `/asdlc:jira-run` in a repo: writes the project config, checks your tokens with test calls, and adds the docs templates. |
 | `/asdlc:review-pr <pr>` | **PR Review.** A single reviewer by default, or a three-panelist council plus chair with `--council`. Works with GitHub, Bitbucket, or a local branch. |
+| `/asdlc:review-tour <PR id \| PR URL \| KEY>` | **Human review.** Walks you through the riskiest hunks of a PR, one behaviour question each, and records the hunks you answered. Never approves or merges. |
 | `/asdlc:pdqc` | **Pre-Delivery Quality Check.** Five inspectors and a QA chair review the whole codebase for the cross-cutting issues that per-PR review can't see. It produces findings and remediation work items, and never edits code. |
 
 ## Requirements
@@ -144,14 +146,26 @@ Then set `use_seed_checklist: true` and the `seed_checklist` path in your repo's
 - **No silent writes to shared systems.** Commits, pushes and Bitbucket writes are not pre-approved; each one is shown to you first.
 - **Tokens stay in your environment.** The Jira token, when you use one, is sent only to your configured Jira URL. Over the Atlassian MCP connector, no token is used and a plugin hook keeps ticket text out of the orchestrator's context.
 
+## Human review
+
+AI review is not a human review. When several tickets run in parallel it is easy to read only the PR description and the review summary, so the plugin tries to make the human read the code, or to make skipping it visible. None of it blocks a merge: `/asdlc:jira-run` never merges.
+
+- **A review queue.** The queue counts the PRs this plugin opened (plans with a recorded `pr`) that still wait for you: open, with no human-review record at the current head and no approval from someone other than the PR's author. When `REVIEW_QUEUE_MAX` of them wait (default 3; `0` turns the cap off), `/asdlc:jira-run` executes nothing, lists the waiting PRs, and still plans new tickets. It recounts after every PR it opens. Every run prints the queue.
+- **A must-read list and a risk tier.** Every review report has a `## Human must read` section: at most 5 hunks, each with a reason from a fixed list (`migration`, `authz`, `irreversible`, `billing`, `infra`, `concurrency`, `api-contract`, `env-config`, `other`). The tier is `high` if any hunk has a reason other than `other`, `normal` if not, and `skim` only for a docs-only or tests-only diff, which is checked against the changed paths. For `high`, the report suggests a teammate's approval on Bitbucket.
+- **A reviewer brief.** After the AI review approves, a read-only `review-brief` agent writes a short brief for you: the intent, which tests assert what the ticket asked, the must-read hunks, deviations from the plan, a reading order and three things to check on a dev environment. `/asdlc:jira-run` posts it as the first PR comment, then the AI summary, each only after you confirm. The orchestrator never reads the brief.
+- **`/asdlc:review-tour <PR>`.** One must-read hunk at a time, it asks you one question about what the code does, waits for your answer, and checks it against the code. It records only the hunks you answered. On Bitbucket it can post the record as a PR comment (after you confirm); for a GitHub PR or a local branch the record stays local. After new commits, the next tour covers only what changed since your last reviewed commit. The record is an honesty aid, not a security control: a model could forge it.
+- **Smaller PRs.** A plan may split its tasks into at most 3 PR slices under `## PR slices` (migrations first). `/asdlc:jira-run` runs one slice per branch and PR, and starts the next only after Bitbucket says the previous PR is merged. One approval covers all slices. A plan without that section is one slice, as before.
+
+Every PR comment the plugin posts starts with `[asdlc] `. Details, exit codes and the trust model are in the [Jira leg guide](plugins/asdlc/jira/README.md#human-review).
+
 ## Subagents
 
-All 16 subagents ship inside the one plugin.
+All 17 subagents ship inside the one plugin.
 
 | Workflow | Subagents |
 |---|---|
 | PRD Implementor | `prd-planner`, `plan-critic`, `prd-executor`, `prd-reviewer`, `prd-tester` |
-| PR Review | `pr-reviewer`, `pr-reviewer-security`, `pr-reviewer-correctness`, `pr-reviewer-architecture`, `pr-review-chair` |
+| PR Review | `pr-reviewer`, `pr-reviewer-security`, `pr-reviewer-correctness`, `pr-reviewer-architecture`, `pr-review-chair`, `review-brief` |
 | PDQC | `inspector-contract-consistency`, `inspector-error-edge`, `inspector-documentation`, `inspector-maintainability-debt`, `inspector-operability`, `qa-chair` |
 
 ## Examples

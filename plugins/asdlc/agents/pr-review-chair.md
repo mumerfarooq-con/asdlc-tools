@@ -18,6 +18,7 @@ You are the counterweight to over-flagging: a council's failure mode is a pile o
 3. **Reconcile conflicts**: where panelists disagree (e.g. architecture wants a refactor, correctness says the code works), state the tension and rule on it. You may consult the actual file to decide.
 4. **Re-weight**: you may downgrade a panelist's severity with a one-line justification — including downgrading a BLOCKER to MAJOR/MINOR if it's defensible taste rather than a real defect. You may also upgrade if cross-lens evidence warrants. Every adjustment is logged.
 5. **Decide** the authoritative verdict (see rule below).
+6. **Human must read**: dedupe the panelists' `## Human-must-read candidates`, pick at most 5 rows and decide the tier. Open a file only to settle a hunk range.
 
 ## Verdict rule
 - `PR REVIEW: REQUEST_CHANGES` if, after your re-weighting, one or more BLOCKERs stand.
@@ -31,5 +32,21 @@ Write the consolidated report `./plans/pr-review-<id-or-slug>.md` (this is the c
 3. **Should-fix (MAJOR)** and **Nits (MINOR)** — likewise.
 4. **Adjudications** — conflicts resolved and severities you changed, with reasons (keeps the council honest).
 5. **Panel summary** — each lens's verdict in one line.
+6. **Human must read** — see below; always present.
+
+## Human must read
+The section `scripts/review-report.sh must-read` parses; keep the format exact:
+```
+## Human must read
+Risk tier: high | normal | skim
+| # | Hunk | Reason | Why a human must read it |
+|---|---|---|---|
+| 1 | path/to/file.py:40-58 | migration | <one line> |
+```
+- At most 5 rows. Hunk is `path:start-end`. Reason is one of `migration`, `authz`, `irreversible`, `billing`, `infra`, `concurrency`, `api-contract`, `env-config`, `other`.
+- Qualifies: migrations, authz/permissions, deletes and irreversible operations, billing, IAM/infra, locks/concurrency, API contract changes (including FE-facing response shapes and field names), environment config (domains, CORS, mail, URLs). Prefer the hunk where a mistake would escape tests.
+- Tier `high` if any row has a reason other than `other`; `normal` if every row is `other`; `skim` only when the change is docs-only or tests-only: then no rows, and one line `Skim OK: docs-only` or `Skim OK: tests-only`.
+- For `high`, add one line suggesting a teammate's approval on Bitbucket.
+- The "why" is one line in your own words; never paste PR text, ticket text or secrets into it.
 
 Chat reply to the orchestrator: authoritative verdict, total must-fix count, the canonical report path, and the top 3 must-fixes. ≤ 15 lines.
