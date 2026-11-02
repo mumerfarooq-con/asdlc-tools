@@ -102,6 +102,10 @@ do_check() {
   for k in MAX_IMAGES MAX_IMAGE_MB; do
     [[ "${!k}" =~ ^[0-9]+$ ]] || fail "$k must be a whole number (is '${!k}')"
   done
+  if [[ "$REVIEW_QUEUE_MAX" =~ ^[0-9]{1,9}$ ]]; then
+    if [ "$REVIEW_QUEUE_MAX" -eq 0 ]; then ok "REVIEW_QUEUE_MAX=0: no review-queue cap"
+    else ok "REVIEW_QUEUE_MAX=$REVIEW_QUEUE_MAX: jira-run starts nothing while $REVIEW_QUEUE_MAX of its PRs wait for a human review"; fi
+  else fail "REVIEW_QUEUE_MAX must be a whole number, 0 = no cap (is '$REVIEW_QUEUE_MAX')"; fi
   case "$JIRA_TRANSPORT" in auto) ;; mcp) ;; rest) ;; *) fail "JIRA_TRANSPORT must be auto, mcp or rest (is '$JIRA_TRANSPORT')" ;; esac
   case "$BB_TRANSPORT" in rest) ;; mcp) ;; *) fail "BB_TRANSPORT must be rest or mcp (is '$BB_TRANSPORT')" ;; esac
   [ -n "$(asdlc_trim "$PIPELINE_COMMENT_MARKER")" ] || fail "PIPELINE_COMMENT_MARKER must not be empty: the pipeline's Jira comments start with it"

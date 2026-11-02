@@ -126,6 +126,61 @@ for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh "$P"/hooks/*.sh; do
 done
 assert_eq "$(grep -c 'write_field plan_hash' "$P/scripts/plan-approve.sh")" "1" "plan-approve.sh is where the hash is re-written"
 
+# The named exception (item 7): reset-executing and next-slice are the only two scripted paths back to
+# approved, both compare-and-set on the human-approved hash through restore_approved in plan-lib.sh.
+# plan-approve.sh stays the only way a NEW hash is approved. Anything else that writes the status
+# "approved" fails this check. $1 = a copy or the real plugin dir; prints one line per violation.
+approver_violations() {
+  local d="$1" f b n
+  for f in "$d"/jira/scripts/*.sh "$d"/scripts/*.sh "$d"/hooks/*.sh; do
+    [ -f "$f" ] || continue; b="$(basename "$f")"
+    # code lines only: a comment may name any of these
+    n="$(grep -vE '^[[:space:]]*#' "$f" | grep -cE 'write_field[[:space:]]+"?status"?[[:space:]]+"?approved' || true)"
+    if [ "$n" -gt 0 ] && [ "$b" != plan-approve.sh ]; then echo "$b writes status approved with write_field"; fi
+    n="$(grep -vE '^[[:space:]]*#' "$f" | grep -cE 'status=approved|status: approved|"status"[[:space:]]*,[[:space:]]*"approved"' || true)"
+    if [ "$n" -gt 0 ] && [ "$b" != plan-lib.sh ]; then echo "$b writes status approved outside restore_approved"; fi
+    # every call of restore_approved (not its definition): where it sits
+    awk -v b="$b" '
+      /^[[:space:]]*#/ {next}
+      /^  [a-z-]+\)/ {arm = $1; sub(/\)$/, "", arm)}
+      /restore_approved\(\)/ {next}
+      /restore_approved[[:space:]]/ {
+        ok = (b == "plan-state.sh" && arm == "reset-executing") || (b == "run-state.sh" && arm == "next-slice")
+        if (!ok) print b ": restore_approved called in " (arm == "" ? "no case arm" : arm) ", not by reset-executing or next-slice"
+        calls++
+      }
+      END { if ((b == "plan-state.sh" || b == "run-state.sh") && calls != 1) print b ": expected exactly one restore_approved call, found " calls + 0 }
+    ' "$f"
+  done
+}
+t "only plan-approve.sh writes a new approval: status approved is written by it, and by restore_approved for reset-executing and next-slice alone"
+assert_eq "$(approver_violations "$P")" "" "violations in the plugin"
+assert_eq "$(grep -c 'write_field status approved' "$P/scripts/plan-approve.sh")" "1" "plan-approve.sh writes it"
+assert_eq "$(grep -vE '^[[:space:]]*#' "$P/scripts/plan-lib.sh" | grep -c 'status=approved')" "1" "restore_approved is the one other writer"
+assert_contains "$(cat "$P/scripts/plan-lib.sh")" "compare-and-set on the hash the" "restore_approved's comment names the compare-and-set"
+assert_contains "$(cat "$P/scripts/plan-lib.sh")" "run-state.sh next-slice" "restore_approved's comment names next-slice"
+assert_contains "$(cat "$P/scripts/plan-state.sh")" "only two scripted paths back to approved" "plan-state.sh names both paths"
+assert_contains "$(cat "$P/jira/scripts/run-state.sh")" "only two scripted paths back to approved" "run-state.sh names both paths"
+assert_not_contains "$(sed -n '/^---$/,/^---$/p' "$P/commands/jira-run.md" | grep '^allowed-tools:')" "plan-approve" "jira-run still cannot approve"
+# a third writer must fail: each of these is a copy of the plugin with one extra writer
+for variant in 'scripts/third.sh|write_field status approved' 'jira/scripts/third.sh|write_field "status" approved' \
+               'jira/scripts/third.sh|restore_approved EXECUTING ""' 'scripts/third.sh|sed -i s/status:.*/status=approved/ "$plan"'; do
+  tmp="$(mktemp -d)"; cp -R "$P/scripts" "$P/jira" "$tmp/"; mkdir -p "$tmp/hooks"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\n%s\n' "${variant#*|}" > "$tmp/${variant%%|*}"
+  if [ -n "$(approver_violations "$tmp")" ]; then ok; else nok "a third writer passed: ${variant#*|}"; fi
+  rm -rf "$tmp"
+done
+# a second call inside the allowed scripts, in another case arm, fails too
+tmp="$(mktemp -d)"; cp -R "$P/scripts" "$P/jira" "$tmp/"; mkdir -p "$tmp/hooks"
+sed 's/^  list)$/  list)\n    restore_approved EXECUTING ""/' "$P/jira/scripts/run-state.sh" > "$tmp/jira/scripts/run-state.sh"
+if [ -n "$(approver_violations "$tmp")" ]; then ok; else nok "a restore_approved call in run-state.sh list passed"; fi
+rm -rf "$tmp"
+# and a commented-out mention is not a writer
+tmp="$(mktemp -d)"; cp -R "$P/scripts" "$P/jira" "$tmp/"; mkdir -p "$tmp/hooks"
+printf '#!/usr/bin/env bash\nset -euo pipefail\n# restore_approved EXECUTING and write_field status approved are not called here\n' > "$tmp/scripts/third.sh"
+assert_eq "$(approver_violations "$tmp")" "" "a comment is not a writer"
+rm -rf "$tmp"
+
 t "/asdlc:plan is human-invoked only; planning and execute commands pre-approve the new scripts"
 fm="$(sed -n '/^---$/,/^---$/p' "$P/commands/plan.md")"
 assert_contains "$fm" "disable-model-invocation: true" "plan.md disable-model-invocation"
@@ -252,5 +307,29 @@ for v in JIRA_TRANSPORT BB_TRANSPORT; do
   case " $conf_keys " in *" $v "*) ok ;; *) nok "$v is a config key" ;; esac
 done
 assert_eq "$(grep -hc '^ASDLC_JIRA_MCP_SERVER=\|^ASDLC_BB_MCP_SERVER=' "$P/jira/templates/jira.conf")" "0" "no server name in the template"
+
+t "docs and release: every command is in the READMEs, the changelog's top version is the plugin's"
+for cmdfile in "$P"/commands/*.md; do
+  c="$(basename "$cmdfile" .md)"
+  assert_contains "$(cat "$ROOT/README.md")" "/asdlc:$c" "README lists /asdlc:$c"
+  assert_contains "$(cat "$P/README.md")" "/asdlc:$c" "plugin README lists /asdlc:$c"
+done
+pv="$(jq -r .version "$P/.claude-plugin/plugin.json")"
+top="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$ROOT/CHANGELOG.md" | head -n1)"
+assert_eq "$top" "$pv" "CHANGELOG top version equals plugin.json"
+assert_contains "$(cat "$P/jira/README.md")" "REVIEW_QUEUE_MAX" "the Jira guide documents the cap"
+assert_contains "$(cat "$P/commands/jira-setup.md")" "REVIEW_QUEUE_MAX" "jira-setup explains the cap"
+
+t "no command or agent pre-approves a bare git subcommand beyond the known ones"
+# A bare `Bash(git <sub>:*)` lets a model pass any option. Allowed: git status, git add (jira-run), git rev-parse (jira-setup).
+for f in "$P"/commands/*.md "$P"/agents/*.md; do
+  [ -f "$f" ] || continue
+  bare="$(sed -n '/^allowed-tools:/p;/^tools:/p' "$f" | grep -o 'Bash(git [a-z-]*:\*)' | grep -v -e 'Bash(git status:\*)' || true)"
+  case "$(basename "$f")" in
+    jira-run.md)   bare="$(printf '%s\n' "$bare" | grep -v -e 'Bash(git add:\*)' || true)" ;;
+    jira-setup.md) bare="$(printf '%s\n' "$bare" | grep -v -e 'Bash(git rev-parse:\*)' || true)" ;;
+  esac
+  assert_eq "$bare" "" "$(basename "$f") has no bare git pre-approval"
+done
 
 finish

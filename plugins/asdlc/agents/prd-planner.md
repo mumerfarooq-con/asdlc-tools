@@ -60,6 +60,7 @@ One pass only. Fix the plan for each row of Critic notes, and fill that row's Pl
 8. If a value grants or denies access, add access to Risk, and propose keeping display separate from access.
 9. "Must still work" has at least one item per affected user type, plus one per needs-change or unsure row, written as checkable examples.
 10. Never guess: unknowns become `- [ ]` Open questions.
+11. PR slices (optional `## PR slices` section, after Changes): a change that is more than one reviewable PR is split into at most 3 slices, merged one after the other. Schema and data migrations go in slice 1, ahead of the behaviour change that needs them; behaviour next; refactors and follow-ups in the last slice, or under "Recommended follow-ups" (not executed). Every task is in exactly one slice and slice order follows task order. The Tasks cell is `1, 2`, a range `1-2`, or both. Do not slice a small change: delete the section and the plan is one PR. Never put a migration in the same slice as the behaviour change that depends on it.
 
 In this mode, Open questions replace the `STATUS: BLOCKED` convention. You still never write the progress line or a header block.
 

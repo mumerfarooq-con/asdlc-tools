@@ -8,6 +8,9 @@
 #   ticket_fingerprint: sha256:<hex>   # Jira plans only: copied by stamp from plans/<ID>/fingerprint
 #   fingerprint_at: <iso8601>          #   (written by jira-context.sh build); outside plan_hash,
 #   fingerprint_source: rest           #   like branch; set refuses all three
+#   slice: 1                 # which "## PR slices" row runs next; stamp writes 1 for a plan that has that
+#                            #   section (none for any other), outside plan_hash, set refuses it, only
+#                            #   run-state.sh next-slice changes it. No line = slice 1.
 #   branch:
 #   pr:
 #   updated: <iso8601>
@@ -21,13 +24,14 @@
 #
 # Usage:
 #   plan-state.sh stamp <plan> [ticket]      # (re)write block: status=pending, fresh hash, empty log
-#   plan-state.sh check <plan>               # RUNNABLE|PENDING|EDITED|STALE|NEEDS_INFO|BLOCKED|EXECUTING|DONE|FAILED|SKIP|MISSING
+#   plan-state.sh check <plan>               # RUNNABLE|PENDING|EDITED|STALE|NEEDS_INFO|BLOCKED|EXECUTING|WAITING|DONE|FAILED|SKIP|MISSING
 #   plan-state.sh set   <plan> <field> <val> # field: status|branch|pr
 #   plan-state.sh reset-executing <plan>     # crashed run: executing -> approved, only if the body is unchanged
 #   plan-state.sh get   <plan> <field>
 #   plan-state.sh validate <plan>            # VALID|INVALID: is the approved part a complete plan?
 #   plan-state.sh replan   <plan>            # move the plan to <ID>.plan.prev.md (not while executing)
 #   plan-state.sh progress <plan>            # latest Progress entry per task, ordered by task
+#   plan-state.sh slice    <plan>            # SLICE <k>/<n> tasks <1,2|all>: the slice that runs next (read-only)
 # <plan> is a path, or a bare ticket id (no '/', not ending .md) meaning ./plans/<ID>.plan.md.
 #
 # The contract: above the progress line is everything a human signs off on (M2's Critic notes
@@ -45,18 +49,22 @@
 # Approval is a human act: "set status approved" is refused, and approving lives in its own
 # script, plan-approve.sh, which no command pre-approves (see there). This script has no approve.
 # reset-executing restores approved for a plan whose header says executing and whose approved part
-# is unchanged. A real guarantee still needs a run record.
+# is unchanged. A real guarantee still needs a run record. It and run-state.sh next-slice are the
+# only two scripted paths back to approved, both through restore_approved in plan-lib.sh, which is a
+# compare-and-set on the human-approved plan_hash (see there). Neither creates an approval.
 # "set <plan> status <v>" refuses (exit 2) unless the move is allowed:
 #   approved               never
 #   executing              only while check says RUNNABLE (approved + hash matches)
 #   done | failed          only from executing
+#   waiting                only from executing, and only if a later slice exists (a "## PR slices" row
+#                          after the current one); its only way out is run-state.sh next-slice
 #   pending|skip|rejected|stale|needs-info|blocked  always (they fail closed)
 # EDITED means the approved part no longer matches its hash (or a header field / progress line
 # is duplicated; the three fingerprint fields count). STALE means the ticket changed after
 # approval (status: stale, set by the ticket check; plan-approve.sh refuses a STALE plan, so it
 # is re-planned); NEEDS_INFO and BLOCKED are likewise set from outside.
 # Exit codes: check = 0 RUNNABLE, 10 PENDING, 11 EDITED, 12 EXECUTING, 13 DONE, 14 FAILED,
-# 15 SKIP, 16 MISSING, 17 STALE, 18 NEEDS_INFO, 19 BLOCKED. Elsewhere: 2 = refused or bad input;
+# 15 SKIP, 16 MISSING, 17 STALE, 18 NEEDS_INFO, 19 BLOCKED, 21 WAITING. Elsewhere: 2 = refused or bad input;
 # 3 = stamp wrote nothing (header not closed, or empty body); 11 = reset-executing found the
 # body changed; 16 = no header block; 20 = validate found the plan INVALID (approve exits 20 too,
 # and writes nothing).
@@ -64,7 +72,7 @@ set -euo pipefail
 # plan-lib.sh holds the shared helpers (hash, state, validate); approve is in plan-approve.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/plan-lib.sh"
 
-cmd="${1:?usage: plan-state.sh <stamp|check|set|reset-executing|get|validate|replan|progress> <plan|ID> ...}"
+cmd="${1:?usage: plan-state.sh <stamp|check|set|reset-executing|get|validate|replan|progress|slice> <plan|ID> ...}"
 plan="${2:?plan file or ticket id required}"
 # A bare ID (no '/', not ending .md) means ./plans/<ID>.plan.md; it must look like a ticket id.
 case "$plan" in
@@ -135,6 +143,12 @@ case "$cmd" in
       printf 'status: pending\n'
       printf 'plan_hash: sha256:%s\n' "$h"
       if [ -n "$fp_lines" ]; then printf '%s\n' "$fp_lines"; fi
+      # Only a plan whose "## PR slices" section holds at least one slice row (slices_part prints
+      # one line per slice) gets the field. A plan with no section, or one that keeps only the
+      # template's hint row, gets none: its header is byte-identical to a pre-1.6.0 one, and no
+      # line reads as slice 1.
+      sl_rows="$(approved_part < "$btmp" | slices_part 2>/dev/null || true)"
+      if [ -n "$sl_rows" ]; then printf 'slice: 1\n'; fi
       printf 'branch:\n'; printf 'pr:\n'
       printf 'updated: %s\n' "$now"
       printf '%s\n' '-->'
@@ -152,6 +166,7 @@ case "$cmd" in
     field="${3:?field required (status|branch|pr)}"; val="${4-}"
     case "$field" in
       status|branch|pr) ;;
+      slice) die 2 "refusing: slice is changed only by run-state.sh next-slice, once the slice's PR is merged" ;;
       ticket_fingerprint|fingerprint_at|fingerprint_source)
         die 2 "refusing: $field is copied by stamp from the fingerprint file; re-plan to change it" ;;
       *) echo "field must be status|branch|pr" >&2; exit 2 ;;
@@ -162,8 +177,8 @@ case "$cmd" in
       status)
         case "$val" in
           approved) die 2 "refusing: approval is a human edit of the plan file" ;;
-          executing|done|failed|pending|skip|rejected|stale|needs-info|blocked) ;;
-          *) die 2 "refusing: unknown status '$val' (allowed: pending|executing|done|failed|skip|rejected|stale|needs-info|blocked)" ;;
+          executing|waiting|done|failed|pending|skip|rejected|stale|needs-info|blocked) ;;
+          *) die 2 "refusing: unknown status '$val' (allowed: pending|executing|waiting|done|failed|skip|rejected|stale|needs-info|blocked)" ;;
         esac ;;
       branch)
         re_ok "$val" '^[A-Za-z0-9._/-]*$' || die 2 "refusing: branch may only contain [A-Za-z0-9._/-]" ;;
@@ -176,6 +191,10 @@ case "$cmd" in
       case "$val" in
         executing)
           [ "$STATE" = RUNNABLE ] || die 2 "refusing: executing needs a RUNNABLE plan (this one is $STATE)" ;;
+        waiting)
+          [ "$STATE" = EXECUTING ] || die 2 "refusing: waiting only follows executing (this plan is $STATE)"
+          slice_info || die 2 "refusing: cannot tell which slice this is (see above)"
+          [ "$SL_CUR" -lt "$SL_N" ] || die 2 "refusing: waiting needs a later slice (this plan is on slice $SL_CUR of $SL_N)" ;;
         done|failed)
           # failed never enables execution, so it is also allowed from executing + EDITED.
           [ "$STATE" = EXECUTING ] || { [ "$val" = failed ] && [ "$STATE" = EDITED ] && [ "$(hdr_get "$plan" status)" = executing ]; } || die 2 "refusing: '$val' only follows executing (this plan is $STATE)" ;;
@@ -195,10 +214,17 @@ case "$cmd" in
     if [ "$CUR_HASH" != "$STORED_HASH" ]; then
       die 11 "the approved part of the plan changed during the crashed run — re-stamp ('plan-state.sh stamp') and have a human re-approve"
     fi
-    write_field status approved
+    rc=0; restore_approved EXECUTING "" || rc=$?
+    [ "$rc" -eq 0 ] || die 11 "the approved part of the plan changed during the crashed run — re-stamp ('plan-state.sh stamp') and have a human re-approve"
     echo "reset $plan: executing -> approved"
     ;;
   get) hdr_get "$plan" "${3:?field required}" ;;
+  slice)
+    [ -f "$plan" ] || die 2 "no such plan: $plan"
+    has_block "$plan" || die 16 "no header block in $plan — run 'plan-state.sh stamp' first"
+    slice_info || exit 2
+    echo "SLICE $SL_CUR/$SL_N tasks $SL_TASKS"
+    ;;
   validate)
     [ -f "$plan" ] || die 2 "no such plan: $plan"
     do_validate || exit $?

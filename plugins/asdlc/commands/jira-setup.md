@@ -27,6 +27,9 @@ Atlassian MCP connector does the Jira work (`JIRA_TRANSPORT=mcp`, or `auto` with
    - A `FAIL` about a value in the config: show me the line, ask for the right value, fix it, re-run.
    - A `FAIL` about an env var or auth: tell me which variable to set in my shell profile
      (e.g. `export JIRA_TOKEN=...` in `~/.zshrc`), then STOP — you can't fix that for me.
+   - `REVIEW_QUEUE_MAX` (default 3, `0` turns the cap off) is how many of the plugin's own PRs may wait
+     for a human review before `/asdlc:jira-run` stops executing. Tell me the value in effect; change it
+     only if I ask.
    - `warn` lines: relay them; they don't block. A missing `STATUS_NEEDS_INFO` needs a Jira admin.
    - With `JIRA_TRANSPORT=mcp`, or `auto` and no Jira token, check skips the Jira REST calls and warns
      what is lost (images, watchers, sprints, the status-name check, the REST fallback for truncated

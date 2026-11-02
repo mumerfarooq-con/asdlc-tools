@@ -9,6 +9,7 @@
 #   run-state.sh reset-executing               # every plan left executing -> approved, if unchanged
 #   run-state.sh list                          # every plan: id, state, branch, pr
 #   run-state.sh start-branch <plan> <summary> # create, or resume, the plan's feature branch
+#   run-state.sh next-slice <plan>             # a WAITING plan whose slice PR is merged -> the next slice
 #
 # force-unlock is deliberately not a prefix of any other subcommand, so a permission rule
 # like "run-state.sh unlock:*" can never pre-approve it.
@@ -16,12 +17,29 @@
 # start-branch prints the branch name on stdout. A plan whose header has no branch gets a new
 # feature/<KEY>-<slug> off an up-to-date TARGET_BRANCH. A plan that recorded a branch in an
 # earlier, crashed run resumes on that branch. An existing branch the plan didn't record is
-# never reused or reset.
+# never reused or reset. From slice 2 on the name ends -s<k>: feature/<KEY>-<slug>-s<k>.
+#
+# next-slice (item 7, D-H9: a plan can be split into up to 3 sequential PR slices) moves a plan that
+# is `waiting` (a slice's PR is open and later slices remain) back to `approved` for the next slice. It
+# is the second of the only two scripted paths back to approved, the other being plan-state.sh
+# reset-executing; both go through restore_approved in plan-lib.sh, a compare-and-set on the hash the
+# human approved, so no approval is created here. It acts only when ALL hold, else the plan is untouched:
+#   - the status is `waiting` and the approved part still hashes to the stored plan_hash (else exit 11);
+#   - a later slice exists (else exit 2);
+#   - Bitbucket REST (GET .../pullrequests/<id>) says the recorded PR is MERGED. Nothing else counts:
+#     no token, a failed call, OPEN, DECLINED, SUPERSEDED, or a PR that is not this repo's all exit 19.
+#     A merge is never inferred from git.
+#   - the PR's source branch (.source.branch.name, from the same GET) equals the plan's recorded `branch` (else exit 19).
+# --fixtures and --conf are refused (exit 2) unless ASDLC_TEST_FIXTURE_CHECK=1; see asdlc_refuse_test_modes in lib.sh.
+# Then, in one write: it appends `- slice <k>: <pr url> merged` under Progress, sets slice to k+1,
+# clears branch and pr, and sets status approved. start-branch then cuts a new branch from the target.
 #
 # Exit codes: 0 ok; 2 bad input or refused; 10 the lock is held; 11 reset-executing refused
 # some plan (its approved part changed); 12 the working tree has uncommitted changes;
 # 13 the branch exists but this plan didn't record it; 14 the plan's recorded branch is gone;
 # 15 the plan has logged progress but records no branch (the branch is gone or was cleared).
+# next-slice: 0 moved to the next slice; 2 refused (not waiting, no later slice, bad config);
+# 11 the approved part changed (re-stamp, re-approve); 16 no header block; 19 the merge is not confirmed.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 ASDLC_CONF_OPTIONAL=1 asdlc_init "$@"; set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
@@ -89,7 +107,7 @@ sweep_mcp() {
   return 0
 }
 
-cmd="${1:?usage: run-state.sh <lock|unlock|status|force-unlock|reset-executing|list|start-branch> ...}"
+cmd="${1:?usage: run-state.sh <lock|unlock|status|force-unlock|reset-executing|list|start-branch|next-slice> ...}"
 case "$cmd" in
   lock)
     mkdir -p "$PLANS"
@@ -160,6 +178,9 @@ case "$cmd" in
       || die 2 "refusing: $plan is not RUNNABLE ($("$PS" check "$plan" 2>/dev/null || true))"
     key="$("$PS" get "$plan" ticket)"
     recorded="$("$PS" get "$plan" branch)"
+    slice="$("$PS" get "$plan" slice)"; slice="${slice:-1}"
+    [[ $slice =~ ^[1-9][0-9]{0,2}$ ]] || die 2 "refusing: the plan's slice '$(printf '%s' "$slice" | tr -cd '[:print:]')' is not a whole number"
+    sfx=""; if [ "$slice" -gt 1 ]; then sfx="-s$slice"; fi
     dirty="$(git status --porcelain --untracked-files=no)"
     current="$(git symbolic-ref --short -q HEAD || true)"
 
@@ -170,6 +191,7 @@ case "$cmd" in
       # this ticket's own feature branch, and never the target branch.
       case "$recorded" in "feature/$key-"*) ;; *) die 2 "refusing: recorded branch '$recorded' is not a feature/$key-* branch" ;; esac
       [ "$recorded" != "$TARGET_BRANCH" ] || die 2 "refusing: recorded branch '$recorded' is the target branch"
+      case "$recorded" in *"$sfx") ;; *) die 2 "refusing: recorded branch '$recorded' is not a slice $slice branch (it should end $sfx)" ;; esac
       git show-ref --verify --quiet "refs/heads/$recorded" \
         || die 14 "$plan recorded branch '$recorded', but it no longer exists — re-stamp and re-approve the plan to start fresh"
       if [ -n "$dirty" ] && [ "$current" != "$recorded" ]; then
@@ -183,14 +205,16 @@ case "$cmd" in
 
     # A plan with no branch but a non-empty log ran on a branch that is gone or was cleared.
     # Starting a fresh branch would let the old log claim work that isn't on it.
+    # An earlier slice's log, up to its "- slice <k>: <pr> merged" line, belongs to a merged branch.
     logged="$(awk '
       f==0 && /^[ \t]*<!--[ \t]*asdlc:progress[ \t]*-->[ \t\r]*$/ {f=1; next}
+      f==1 && /^- slice [0-9]+: .* merged[ \t\r]*$/ {n=0; next}
       f==1 && $0 !~ /^[ \t\r]*$/ && $0 !~ /^## Progress[ \t\r]*$/ {n++}
       END {print n+0}' "$plan")"
     [ "$logged" -eq 0 ] || die 15 "$plan logged progress on a branch that is gone or was cleared — re-stamp and re-approve it"
     [ -z "$dirty" ] || die 12 "uncommitted changes on '${current:-detached HEAD}' — commit or stash them first"
     check_branch_name "TARGET_BRANCH" "$TARGET_BRANCH"
-    branch="feature/$key-$(slugify "$summary")"
+    branch="feature/$key-$(slugify "$summary")$sfx"
     check_branch_name "branch" "$branch"
     if git show-ref --verify --quiet "refs/heads/$branch"; then
       die 13 "branch '$branch' already exists but $plan didn't record it — delete or rename that branch, or set the plan's branch: field to it to resume there"
@@ -206,6 +230,67 @@ case "$cmd" in
     fi
     echo "created $branch from $TARGET_BRANCH" >&2
     echo "$branch"
+    ;;
+  next-slice)
+    asdlc_refuse_test_modes "run-state.sh next-slice"
+    plan="${2:?usage: run-state.sh next-slice <plan>}"
+    case "$plan" in
+      */*|*.md) ;;
+      *) [[ $plan =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die 2 "refusing: a bare plan id must match [A-Za-z0-9][A-Za-z0-9._-]* (or pass a path)"
+         plan="./plans/$plan.plan.md" ;;
+    esac
+    . "$ASDLC_SHARED_SCRIPTS/plan-lib.sh"      # compute_state, slice_info, restore_approved
+    compute_state
+    case "$STATE" in
+      WAITING) ;;
+      MISSING) die 16 "no header block in $plan — nothing to advance" ;;
+      *) die 2 "refusing: $plan is $STATE, not WAITING — next-slice only follows a slice whose PR is open" ;;
+    esac
+    if [ "$CUR_HASH" != "$STORED_HASH" ]; then
+      die 11 "the approved part of the plan changed since it was approved — re-stamp and have a human re-approve"
+    fi
+    slice_info || die 2 "refusing: cannot tell which slice this is (see above)"
+    [ "$SL_CUR" -lt "$SL_N" ] || die 2 "refusing: slice $SL_CUR is the last slice of $plan (of $SL_N); there is no next slice"
+    url="$("$PS" get "$plan" pr)"
+    [ -n "$url" ] || die 19 "slice $SL_CUR has no PR recorded in the plan, so its merge cannot be confirmed"
+    [ -n "$BB_WORKSPACE" ] && [ -n "$BB_REPO" ] || die 2 "BB_WORKSPACE and BB_REPO must be set in ${ASDLC_CONF_FILE:-.asdlc/jira.conf}"
+    bb_err="$(asdlc_check_bb_target 2>&1)" || die 2 "$bb_err"
+    pref="https://bitbucket.org/$BB_WORKSPACE/$BB_REPO/pull-requests/"
+    pid="${url#"$pref"}"; pid="${pid%/}"
+    if [ "$pid" = "$url" ] || ! [[ $pid =~ ^[0-9]{1,9}$ ]]; then
+      die 19 "slice $SL_CUR's PR is not a pull request of $BB_WORKSPACE/$BB_REPO on bitbucket.org, so its merge cannot be confirmed"
+    fi
+    pid=$((10#$pid))
+    if [ -z "$ASDLC_FIXTURES" ]; then
+      { [ -n "${BITBUCKET_TOKEN:-}" ] && { [ "$BB_AUTH" != basic ] || [ -n "${BITBUCKET_EMAIL:-}" ]; }; } \
+        || die 19 "no Bitbucket token (BITBUCKET_TOKEN), so the merge of PR $pid cannot be confirmed; the plan is untouched"
+    fi
+    errf="$(mktemp)"
+    if ! prj="$(asdlc_get_json bb "/repositories/$BB_WORKSPACE/$BB_REPO/pullrequests/$pid" 2>"$errf")"; then
+      why="$(tr -cd '[:print:]' <<<"$(head -n1 "$errf")")"; rm -f "$errf"
+      die 19 "Bitbucket REST failed for PR $pid ($why), so its merge cannot be confirmed; the plan is untouched"
+    fi
+    rm -f "$errf"
+    pst="$(jq -r '.state // ""' <<<"$prj" 2>/dev/null)" || pst=""
+    psrc="$(jq -r '.source.branch.name // ""' <<<"$prj" 2>/dev/null)" || psrc=""
+    case "$pst" in
+      MERGED) ;;
+      OPEN|DECLINED|SUPERSEDED) die 19 "slice $SL_CUR's PR $pid is $pst, not MERGED; the plan is untouched" ;;
+      *) die 19 "Bitbucket gave no usable state for PR $pid, so its merge cannot be confirmed; the plan is untouched" ;;
+    esac
+    # The PR must come from this plan's own branch: a stale pr URL of another merged PR must not pass.
+    pbr="$("$PS" get "$plan" branch)"
+    if [ -z "$psrc" ] || [ -z "$pbr" ] || [ "$psrc" != "$pbr" ]; then
+      die 19 "PR $pid's source branch is not this plan's recorded branch, so its merge cannot be confirmed for this slice; the plan is untouched"
+    fi
+    rc=0
+    restore_approved WAITING "- slice $SL_CUR: $url merged" "slice=$((SL_CUR + 1))" "branch=" "pr=" || rc=$?
+    case "$rc" in
+      0) ;;
+      11) die 11 "the approved part of the plan changed since it was approved — re-stamp and have a human re-approve" ;;
+      *) die 2 "refusing: $plan is no longer WAITING" ;;
+    esac
+    echo "$(plan_id "$plan"): slice $SL_CUR merged; now on slice $((SL_CUR + 1)) of $SL_N (approved)"
     ;;
   *) echo "unknown command: $cmd" >&2; exit 2 ;;
 esac

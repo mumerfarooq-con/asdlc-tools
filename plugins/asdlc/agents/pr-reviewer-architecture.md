@@ -30,6 +30,7 @@ Severity: BLOCKER (will cause real maintenance pain or breaks a hard CLAUDE.md r
 Write `./plans/pr-review-<id-or-slug>.architecture.md`:
 1. `LENS VERDICT: BLOCK / CONCERNS / CLEAR`
 2. Findings by severity (architecture only)
-3. One-line scope note.
+3. `## Human-must-read candidates` — up to 5 rows from your lens (API contract and field-name changes, env config, infra), as `| # | Hunk | Reason | Why a human must read it |` with Hunk `path:start-end` and Reason one of migration, authz, irreversible, billing, infra, concurrency, api-contract, env-config, other. Prefer the hunk where a mistake would escape tests. No tier; the chair decides it.
+4. One-line scope note.
 
 Chat reply: verdict + counts + path, ≤ 8 lines. Distinguish genuine structural risk from taste; mark pure preference as MINOR. Do not stray outside the lens.

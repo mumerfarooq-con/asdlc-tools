@@ -11,6 +11,7 @@ Agentic SDLC workflows for Claude Code. ASDLC takes a spec or a Jira ticket, wri
 | `/asdlc:jira-run` | Builds the Jira tickets whose plans you approved, opens a Bitbucket PR for each and reviews it, then plans your new tickets. |
 | `/asdlc:jira-setup` | Sets up `/asdlc:jira-run` in a repository. |
 | `/asdlc:review-pr <pr>` | Reviews a GitHub or Bitbucket PR, or a local branch. Add `--council` for a security, correctness and architecture panel with a chair. |
+| `/asdlc:review-tour <PR>` | Walks you through the riskiest hunks of a PR, one question each, and records what you answered. Never approves or merges. |
 | `/asdlc:pdqc` | Runs a pre-delivery quality check across the whole codebase and produces findings and remediation work items. |
 
 ASDLC is built for Claude Code: the terminal, an IDE, or the desktop app's Code tab. Its workflows run shell scripts and `git` in your repository. In regular chat, commands load only as skills, and the subagents are ignored.
