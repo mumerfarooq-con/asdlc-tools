@@ -60,7 +60,6 @@ RP="$ASDLC_SHARED_SCRIPTS/review-report.sh"
 PS="$ASDLC_SHARED_SCRIPTS/plan-state.sh"
 API="https://api.bitbucket.org/2.0"
 SHA_RE='^[0-9a-f]{7,40}$'
-URL_PREFIX="https://bitbucket.org/$BB_WORKSPACE/$BB_REPO/pull-requests/"
 
 REST=0
 if [ -n "$ASDLC_FIXTURES" ]; then REST=1
@@ -179,11 +178,9 @@ for plan in "$PLANS"/*.plan.md; do
   key="$("$PS" get "$plan" ticket 2>/dev/null || true)"; key="$(asdlc_trim "$key")"
   [ -n "$key" ] || { key="${plan##*/}"; key="${key%.plan.md}"; }
   if ! asdlc_is_key "$key"; then log_warn "$(printable "$plan"): not a ticket key; skipped"; continue; fi
-  id="${url#"$URL_PREFIX"}"; id="${id%/}"
-  if [ "$id" = "$url" ] || ! [[ $id =~ ^[0-9]{1,9}$ ]]; then
+  if ! id="$(asdlc_pr_id_from_url "$url")"; then
     log_warn "$key: pr '$(printable "$url")' is not a pull request of $BB_WORKSPACE/$BB_REPO on bitbucket.org; skipped"; continue
   fi
-  id=$((10#$id))
   branch="$("$PS" get "$plan" branch 2>/dev/null || true)"; branch="$(asdlc_trim "$branch")"
 
   git_ok=0; git_pr "$branch" && git_ok=1 || { G_STATE=""; G_HEAD=""; }
@@ -219,8 +216,7 @@ for plan in "$PLANS"/*.plan.md; do
   case "$state" in OPEN|UNKNOWN) [ "$human" != current ] && [ "$teammate" = no ] && is_waiting=1 ;; esac
   [ "$is_waiting" -eq 0 ] || waiting=$((waiting + 1))
   if [ "$is_waiting" -eq 1 ] || [ "$ALL" -eq 1 ]; then
-    sl="$("$PS" get "$plan" slice 2>/dev/null || true)"; sl="$(asdlc_trim "$sl")"
-    rid="$key"; if [[ $sl =~ ^[1-9][0-9]{0,2}$ ]] && [ "$sl" -gt 1 ]; then rid="$key-s$sl"; fi
+    rid="$("$PS" report-id "$plan" 2>/dev/null)" || rid="$key"
     tier_of "$key" "$branch" "$rid"
     lines="$lines$(printf 'PR %s %s %s human=%s teammate=%s tier=%s reasons=%s' "$id" "$key" "$state" "$human" "$teammate" "$T_TIER" "$T_REASONS")
 "

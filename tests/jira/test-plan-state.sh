@@ -746,4 +746,109 @@ vplan G; "$PS" stamp "$P" >/dev/null; log_progress "$P" "- Task 1: TEST PASS —
 edit_approved "$P" "- Task 7: TEST FAIL — above the line, not progress"
 run "$PS" progress G; assert_eq "$OUT" "Task 1: TEST PASS" "only below the line"
 
+# ---- log: the one writer of Progress lines (D-A4) ------------------------------------------
+tbody() { printf '# PROJ-1: plan\n\n## Changes\n\n### Task 1: first\n\n### Task 2: second\n\n### Task 10: tenth\n'; }
+tplan() { tbody > "plans/$1.plan.md"; "$PS" stamp "plans/$1.plan.md" >/dev/null; }  # <KEY>: stamped, with three tasks
+
+t "log appends one line below the progress line, and the approval hash stays valid"
+sandbox; mkdir plans; tplan L; P=plans/L.plan.md; approve "$P"
+h0="$("$PS" get "$P" plan_hash)"; ap0="$(sed -n '1,/^<!-- asdlc:progress -->$/p' "$P" | sed '1,/^-->$/d')"
+run "$PS" log "$P" 1 EXECUTOR DONE "files a.py"; assert_eq "$OUT/$CODE" "logged Task 1: EXECUTOR DONE/0" "first log"
+run "$PS" log "$P" 1 REVIEW CHANGES_REQUESTED "fix x"; assert_eq "$CODE" "0" "second log"
+run "$PS" log L 10 TEST PASS "all green"; assert_eq "$CODE" "0" "bare id, task 10"
+assert_eq "$(tail -n 3 "$P")" "- Task 1: EXECUTOR DONE — files a.py
+- Task 1: REVIEW CHANGES_REQUESTED — fix x
+- Task 10: TEST PASS — all green" "lines as appended"
+assert_eq "$("$PS" get "$P" plan_hash)" "$h0" "stored hash untouched"
+assert_eq "$("$PS" check "$P" 2>/dev/null)" "RUNNABLE" "still RUNNABLE after log (hash valid)"
+assert_eq "$(sed -n '1,/^<!-- asdlc:progress -->$/p' "$P" | sed '1,/^-->$/d')" "$ap0" "approved part byte-identical"
+assert_eq "$(sed -n '/^<!-- asdlc:progress -->$/,$p' "$P" | head -n2)" "<!-- asdlc:progress -->
+## Progress" "progress section header intact"
+
+t "log: the parser reads what log wrote"
+run "$PS" progress "$P"
+assert_eq "$OUT" "Task 1: REVIEW CHANGES_REQUESTED
+Task 10: TEST PASS" "latest entry per task"
+"$PS" log "$P" 2 EXECUTOR BLOCKED "" >/dev/null
+assert_contains "$(tail -n1 "$P")" "- Task 2: EXECUTOR BLOCKED — no note" "an empty note gets a placeholder"
+assert_contains "$("$PS" progress "$P")" "Task 2: EXECUTOR BLOCKED" "parser reads the placeholder line"
+
+t "log: the contract vocabulary, and nothing else"
+for v in "REVIEWER APPROVED" "TESTER PASS" "EXECUTOR PASS" "REVIEW DONE" "TEST APPROVED" "executor done" "TEST: PASS"; do
+  set -- $v; cp "$P" "$P.before"
+  run "$PS" log "$P" 1 "$1" "${2:-}" "x"; assert_eq "$CODE" "2" "[$v] exit"; assert_contains "$ERR" "refusing" "[$v] message"
+  cmp -s "$P" "$P.before" && ok || nok "[$v] changed the plan"
+done
+run "$PS" log "$P" 1 "EXECUTOR DONE" "x"; assert_eq "$CODE" "2" "role and verdict as one argument"
+run "$PS" log "$P" 1 EXECUTOR DONE "a" "b"; assert_eq "$CODE" "2" "two note arguments"
+
+t "log: a task that is not a '### Task <n>' above the progress line"
+cp "$P" "$P.before"
+for n in 3 0 01 1x "" "1 2" "-1" 99999 "1
+2"; do
+  run "$PS" log "$P" "$n" TEST PASS "x"; assert_eq "$CODE" "2" "[$n] exit"
+done
+cmp -s "$P" "$P.before" && ok || nok "a refused task changed the plan"
+printf -- '### Task 3: only in the log\n' >> "$P"
+run "$PS" log "$P" 3 TEST PASS "x"; assert_eq "$CODE" "2" "a heading below the progress line is not a task"
+cp "$P.before" "$P"
+
+t "log: a note with a newline or a control character is refused, and a long note is capped at 300 bytes"
+cp "$P" "$P.before"
+for n in "a
+b" "a"$'\r'"b" "a"$'\t'"b" "a"$'\033'"[31m" "a"$'\001'; do
+  run "$PS" log "$P" 1 TEST PASS "$n"; assert_eq "$CODE" "2" "control note exit"
+done
+cmp -s "$P" "$P.before" && ok || nok "a refused note changed the plan"
+long="$(printf 'x%.0s' $(seq 1 400))"
+run "$PS" log "$P" 1 TEST FAIL "$long"; assert_eq "$CODE" "0" "long note exit"
+assert_eq "$(tail -n1 "$P" | wc -c | tr -d ' ')" "$(printf -- '- Task 1: TEST FAIL — ' | wc -c | tr -d ' ' | awk '{print $1+300+1}')" "note capped at 300 bytes"
+run "$PS" log "$P" 1 TEST PASS "naïve — café"; assert_eq "$CODE" "0" "non-ASCII note allowed"
+assert_contains "$(tail -n1 "$P")" "naïve — café" "non-ASCII kept"
+# A cut through a multibyte character drops the broken part (299 bytes, then an em dash).
+split="$(printf 'x%.0s' $(seq 1 299))—"
+run "$PS" log "$P" 1 TEST PASS "$split"; assert_eq "$CODE" "0" "split note exit"
+if tail -n1 "$P" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then ok; else nok "the cut left a broken UTF-8 character"; fi
+assert_eq "$(tail -n1 "$P" | wc -c | tr -d ' ')" "$(printf -- '- Task 1: TEST PASS — ' | wc -c | tr -d ' ' | awk '{print $1+299+1}')" "cut back to the last whole character"
+# A note of invalid bytes only: iconv prints nothing, and the line says "no note", never the raw bytes.
+run "$PS" log "$P" 1 TEST PASS $'\xe2\x80'; assert_eq "$CODE" "0" "invalid-only note exit"
+assert_eq "$(tail -n1 "$P")" "- Task 1: TEST PASS — no note" "invalid-only note logged as no note"
+assert_eq "$("$PS" check "$P" 2>/dev/null)" "RUNNABLE" "check still RUNNABLE after an invalid-only note"
+
+t "log with no iconv on PATH keeps printable ASCII only, so the line stays valid UTF-8"
+# Every PATH directory linked into one, minus iconv.
+noiconv="$SB/noiconv"; mkdir -p "$noiconv"
+( IFS=:; for d in $PATH; do [ -d "$d" ] && ln -s "$d"/* "$noiconv/" 2>/dev/null; done; true )
+rm -f "$noiconv/iconv"
+if PATH="$noiconv" command -v iconv >/dev/null 2>&1; then nok "iconv still on the test PATH"; else ok; fi
+cut150="a$(printf '—%.0s' $(seq 1 150))"
+run env PATH="$noiconv" "$PS" log "$P" 1 TEST PASS "$cut150"; assert_eq "$CODE" "0" "no-iconv exit"
+assert_eq "$(tail -n1 "$P")" "- Task 1: TEST PASS — a" "no-iconv: the split character and the rest are dropped"
+if tail -n1 "$P" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then ok; else nok "no-iconv left a broken UTF-8 character"; fi
+run env PATH="$noiconv" "$PS" log "$P" 1 TEST PASS "——"; assert_eq "$CODE" "0" "no-iconv non-ASCII-only exit"
+assert_eq "$(tail -n1 "$P")" "- Task 1: TEST PASS — no note" "no-iconv: nothing printable left is no note"
+assert_eq "$("$PS" check "$P" 2>/dev/null)" "RUNNABLE" "check still RUNNABLE after the no-iconv notes"
+
+t "log: no header, no progress line, a second progress line, no file"
+printf '# plain\n\n### Task 1: x\n' > plans/N.plan.md
+run "$PS" log plans/N.plan.md 1 TEST PASS "x"; assert_eq "$CODE" "16" "no header block"
+{ printf '<!-- asdlc\nticket: N\nstatus: pending\nplan_hash: sha256:0\n-->\n### Task 1: x\n'; } > plans/M.plan.md
+run "$PS" log plans/M.plan.md 1 TEST PASS "x"; assert_eq "$CODE" "2" "header but no progress line"
+assert_contains "$ERR" "progress" "names the progress line"
+tplan D; printf '%s\n' "$PROGRESS" >> plans/D.plan.md
+run "$PS" log D 1 TEST PASS "x"; assert_eq "$CODE" "2" "two progress lines"
+run "$PS" log plans/none.plan.md 1 TEST PASS "x"; assert_eq "$CODE" "2" "no such plan"
+
+t "log: a plan whose last line has no newline still gets a clean line"
+tplan E; printf '%s' "- Task 1: TEST PASS — a" >> plans/E.plan.md
+run "$PS" log E 2 TEST PASS "b"; assert_eq "$CODE" "0" "exit"
+assert_eq "$(tail -n2 plans/E.plan.md)" "- Task 1: TEST PASS — a
+- Task 2: TEST PASS — b" "two separate lines"
+assert_eq "$("$PS" check plans/E.plan.md 2>/dev/null)" "PENDING" "hash fine (pending, not EDITED)"
+
+t "log: an unapproved or executing plan is logged the same (it never reads or sets status)"
+tplan F; h1="$("$PS" get F plan_hash)"; st1="$("$PS" get F status)"
+"$PS" log F 1 EXECUTOR DONE "x" >/dev/null
+assert_eq "$("$PS" get F plan_hash)/$("$PS" get F status)" "$h1/$st1" "header fields unchanged"
+
 finish

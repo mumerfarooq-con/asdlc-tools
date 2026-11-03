@@ -20,7 +20,7 @@ assert_eq "$hits" "" "hardcoded secrets"
 
 t "scripts are executable, use bash, and set strict mode"
 for f in "$P"/jira/scripts/*.sh "$P"/scripts/*.sh "$P"/hooks/*.sh; do
-  case "$f" in */lib.sh|*/plan-lib.sh|*/context-lib.sh|*/fp-sources.sh) continue ;; esac   # sourced libraries, never run
+  case "$f" in */lib.sh|*/plan-lib.sh|*/context-lib.sh|*/mcp-lib.sh|*/review-lib.sh|*/fp-sources.sh) continue ;; esac   # sourced libraries, never run
   [ -x "$f" ] && ok || nok "$(basename "$f") not executable"
   [ "$(head -n1 "$f")" = "#!/usr/bin/env bash" ] && ok || nok "$(basename "$f") shebang"
   grep -q '^set -euo pipefail' "$f" && ok || nok "$(basename "$f") lacks set -euo pipefail"
@@ -195,7 +195,8 @@ t "implement-prd and jira-run never hand an agent a plugin-dir template path; th
 for cmdname in implement-prd jira-run; do
   assert_not_contains "$(cat "$P/commands/$cmdname.md")" 'CLAUDE_PLUGIN_ROOT}/templates/' "$cmdname has no plugin-dir template path"
 done
-assert_contains "$(cat "$P/commands/implement-prd.md")" "plans/<ID>/plan-template.md" "implement-prd names the in-repo template copy"
+assert_not_contains "$(cat "$P/docs/plan-only-flow.md")" 'CLAUDE_PLUGIN_ROOT}/templates/' "plan-only-flow.md has no plugin-dir template path"
+assert_contains "$(cat "$P/docs/plan-only-flow.md")" "plans/<ID>/plan-template.md" "the plan-only flow names the in-repo template copy"
 
 t "the plan template has every heading validate requires, no header and no progress line"
 tpl="$P/templates/plan.md"
@@ -253,7 +254,7 @@ assert_contains "$phb" "context.md" "Phase B plans from context.md"
 assert_contains "$jr" "RUNNABLE, VALID and FRESH" "Phase A needs FRESH"
 assert_contains "$jr" "or in the next planning run under \`--execute-only\`" "Phase A STALE line says when --execute-only re-plans"
 assert_contains "$(cat "$P/commands/implement-prd.md")" "ticket_fingerprint" "implement-prd warns on a fingerprinted plan (D10)"
-assert_contains "$(cat "$P/commands/implement-prd.md")" "changes.md" "implement-prd passes changes.md on a re-plan"
+assert_contains "$(cat "$P/docs/plan-only-flow.md")" "changes.md" "the plan-only flow passes changes.md on a re-plan"
 
 t "the plan template, planner and critic know the ticket bundle and what changed"
 tp="$(cat "$P/templates/plan.md")"
@@ -331,5 +332,202 @@ for f in "$P"/commands/*.md "$P"/agents/*.md; do
   esac
   assert_eq "$bare" "" "$(basename "$f") has no bare git pre-approval"
 done
+
+t "the capture protocol is written once: one TTL, one request writer, one reader, and the receipts name real script commands (SF-3, N-10)"
+HOOK="$P/hooks/mcp-capture.sh"; JS="$P/jira/scripts"
+ttl="$(grep -rnw '600' "$P/jira" "$P/hooks" "$P/scripts" --include='*.sh' | grep -v '/mcp-lib.sh:' || true)"
+assert_eq "$ttl" "" "a second copy of the request TTL outside mcp-lib.sh"
+assert_eq "$(grep -c '^MCP_TTL=' "$JS/mcp-lib.sh")" "1" "the one TTL constant"
+assert_contains "$(cat "$JS/mcp-lib.sh")" '--argjson ttl "$MCP_TTL"' "the opener uses it"
+w="$(grep -ln 'expires_epoch:' "$P"/jira/scripts/*.sh "$P"/scripts/*.sh "$P"/hooks/*.sh | grep -v '/mcp-lib.sh$' || true)"
+assert_eq "$w" "" "a request written outside mcp_request_open"
+assert_contains "$(sed -n '/^mcp_request_open()/,/^}/p' "$JS/mcp-lib.sh")" 'kind: $kind' "every request carries a kind"
+for f in lib.sh jira-context.sh jira-mine.sh jira-transition.sh jira-notify.sh bb-open-pr.sh bb-pr-comment.sh; do
+  assert_eq "$(grep -cE 'nonce="\$\(od|\.nonce[^ ]* *== *\$n' "$JS/$f")" "0" "$f keeps its own nonce or capture loop"
+done
+# Every script command line the hook puts in a receipt names a script that exists (and, for a subcommand
+# or flag, one that script knows).
+n=0
+while IFS= read -r ref; do
+  [ -n "$ref" ] || continue
+  n=$((n + 1)); sc="${ref%% *}"; arg=""; case "$ref" in *" "*) arg="${ref#* }" ;; esac
+  found=""; for d in "$JS" "$P/scripts" "$P/hooks"; do [ -f "$d/$sc" ] && found="$d/$sc"; done
+  if [ -z "$found" ]; then nok "a hook receipt names $sc, which is not a script of the plugin"; continue; fi
+  ok
+  case "$arg" in
+    --*|fetch|check|build|mcp-request|fingerprint|transport|guard|bb)
+      grep -q -- "$arg" "$found" && ok || nok "a hook receipt says '$sc $arg', which $sc does not know" ;;
+  esac
+done < <(grep -oE '[a-z][a-z-]*\.sh( (--)?[a-z-]+)?' "$HOOK" | sort -u)
+[ "$n" -ge 6 ] && ok || nok "found only $n script references in the hook"
+for ref in "jira-context.sh mcp-request" "jira-context.sh fetch" "jira-context.sh check" "jira-notify.sh --from-mcp" "jira-mine.sh --from-mcp"; do
+  assert_contains "$(cat "$HOOK")" "$ref" "the hook's receipts still say: $ref"
+done
+assert_contains "$(cat "$P/jira/README.md")" "### Capture protocol" "the README section"
+for f in "$HOOK" "$P/commands/jira-run.md" "$JS/mcp-lib.sh" "$JS/jira-mine.sh"; do
+  assert_contains "$(cat "$f")" "Capture protocol" "$(basename "$f") cites the README section"
+done
+
+t "one report id, one hunk grammar, one pr-id parser, one need_key (M4a Task 2)"
+for f in "$P/commands/review-tour.md" "$P/commands/jira-run.md"; do
+  assert_not_contains "$(cat "$f")" '<KEY>-s<k>' "$(basename "$f") does not spell out the report id rule"
+  assert_contains "$(cat "$f")" 'plan-state.sh report-id <plan>' "$(basename "$f") asks plan-state.sh report-id"
+  assert_contains "$(sed -n '/^---$/,/^---$/p' "$f" | grep '^allowed-tools:')" 'plan-state.sh report-id:*' "$(basename "$f") pre-approves report-id"
+done
+assert_contains "$(grep '^allowed-tools:' "$P/commands/review-tour.md")" 'plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh report-id:*)' "the tour reads get and report-id"
+for f in review-report.sh review-record.sh review-brief.sh review-queue.sh run-state.sh bb-pr-comment.sh; do
+  g="$(ls "$P/scripts/$f" "$JS/$f" 2>/dev/null | head -n1)"
+  assert_eq "$(grep -cE '^(need_key|need_dir|valid_hunk)\(\)' "$g")" "0" "$f defines no local need_key/need_dir/valid_hunk"
+done
+assert_contains "$(cat "$P/scripts/review-report.sh" "$JS/review-record.sh")" "asdlc_valid_hunk" "both hunk readers use the shared check"
+assert_eq "$(grep -c 'pull-requests/' "$JS/run-state.sh" "$JS/review-queue.sh" | grep -v ':0' | grep -cv 'review-queue.sh:[0-9]*$' || true)" "0" "no PR id parsing left in run-state.sh"
+assert_not_contains "$(grep -n 'pid="${url#' "$JS/run-state.sh" || true)" "pid=" "run-state.sh strips no URL prefix itself"
+assert_not_contains "$(grep -n 'id="${url#' "$JS/review-queue.sh" || true)" "id=" "review-queue.sh strips no URL prefix itself"
+
+t "the plan-only flow is one shared file, both commands read it, and Phase A has its named parts (M4a Task 3)"
+flow="$P/docs/plan-only-flow.md"
+[ -f "$flow" ] && ok || nok "docs/plan-only-flow.md is missing"
+for f in "$P/commands/implement-prd.md" "$P/commands/jira-run.md"; do
+  assert_contains "$(cat "$f")" 'Read `${CLAUDE_PLUGIN_ROOT}/docs/plan-only-flow.md` and follow it' "$(basename "$f") reads the plan-only flow"
+done
+assert_not_contains "$(sed -n '/^## Plan-only mode/,/^## Execute mode/p' "$P/commands/implement-prd.md")" "prd-planner" "implement-prd no longer carries the plan-only steps"
+for f in "$P"/docs/*.md; do
+  assert_not_contains "$(head -n1 "$f")" "---" "$(basename "$f") has command frontmatter"
+done
+for h in "### Review queue" "### Which plans run" "### Stale check" "### Run a plan" "### After APPROVE: brief, then AI summary" "## Jira over MCP"; do
+  assert_contains "$(grep -E '^##+ ' "$P/commands/jira-run.md")" "$h" "jira-run has the heading: $h"
+done
+
+t "progress lines come from plan-state.sh log: no agent edits the plan, implement-prd logs each verdict, meta feeds review-mode"
+for a in prd-executor prd-reviewer prd-tester; do
+  c="$(contract "$P/agents/$a.md")"
+  assert_contains "$c" 'Never edit the plan file' "$a contract: never edit the plan"
+  assert_contains "$c" 'plan-state.sh log' "$a contract names the logger"
+  assert_contains "$c" '<ROLE> <VERDICT> — <note>' "$a contract: return the verdict line"
+  assert_not_contains "$c" 'Append one entry' "$a contract no longer tells the agent to append"
+  assert_not_contains "$(cat "$P/agents/$a.md")" 'a Progress entry in a stamped plan' "$a has no Progress-entry instruction"
+done
+assert_not_contains "$(cat "$P/agents/prd-reviewer.md")" 'append to the task in the plan' "reviewer does not write the plan"
+rtools="$(sed -n 's/^tools: //p' "$P/agents/prd-reviewer.md")"
+assert_contains "$rtools" "Write" "the reviewer keeps Write: it writes its own retrospective review file"
+assert_contains "$(cat "$P/agents/prd-reviewer.md")" './plans/<prd-slug>.review.md' "the reviewer names that file"
+assert_contains "$(cat "$P/agents/prd-reviewer.md")" 'the only file you write' "and says it is the only file"
+ip="$(cat "$P/commands/implement-prd.md")"; ipfm="$(sed -n '/^---$/,/^---$/p' "$P/commands/implement-prd.md")"
+assert_contains "$ip" 'plan-state.sh log <plan> <n> <ROLE> <VERDICT> "<note>"' "implement-prd names the log call"
+assert_contains "$ipfm" 'plan-state.sh log:*' "implement-prd pre-approves plan-state.sh log"
+for v in 'EXECUTOR DONE' 'EXECUTOR BLOCKED' 'REVIEW APPROVED' 'REVIEW CHANGES_REQUESTED' 'TEST PASS' 'TEST FAIL'; do
+  assert_contains "$ip" "\`$v\`" "implement-prd quotes the contract string $v"
+done
+assert_not_contains "$ip" 'REVIEWER' "implement-prd never calls a role REVIEWER"
+assert_not_contains "$ip" 'TESTER ' "implement-prd never calls a role TESTER"
+# jira-run pre-approves log (the skill it runs needs it), but its own steps never call it.
+assert_not_contains "$(awk 'f>=2; /^---$/{f++}' "$P/commands/jira-run.md")" 'plan-state.sh log' "jira-run's steps do not log: the implement-prd skill does"
+assert_contains "$jr" 'jira-context.sh meta <KEY>' "jira-run step 5 gets the type and labels from meta"
+assert_contains "$jr" 'review-mode.sh <TARGET_BRANCH> HEAD "<issue_type>" "<labels_csv>"' "and passes them to review-mode.sh"
+assert_not_contains "$(grep -rn 'plan-state.sh log\|asdlc:progress' "$P/docs/plan-only-flow.md" | grep -v 'stamp')" 'plan-state.sh log' "the plan-only flow never logs"
+
+t "unstamped plans: Pipeline mode does not log or stamp, and each agent says what it does there (PR #10 SF-1)"
+assert_contains "$ip" 'If `log` exits 16 ("no header block")' "implement-prd names log's exit 16"
+assert_contains "$ip" 'never run `plan-state.sh stamp` here' "implement-prd says never to stamp"
+assert_contains "$ip" 'so Pipeline mode' "implement-prd says Pipeline mode does not log"
+efm="$(sed -n '/^---$/,/^---$/p' "$P/agents/prd-executor.md")"
+assert_not_contains "$efm" "updates the plan's task status" "the executor's description no longer says it always updates the plan"
+assert_contains "$efm" 'only when the' "the executor's description says when it marks the task"
+for a in prd-executor prd-reviewer prd-tester; do
+  assert_contains "$(contract "$P/agents/$a.md")" 'A plan without that line: see your *Verdict* or *On completion* section below.' "$a contract points unstamped plans at its own section"
+done
+assert_contains "$(cat "$P/agents/prd-reviewer.md")" 'In a plan that is not stamped, nothing records your verdict' "the reviewer says nothing records its verdict there"
+assert_contains "$jr" 'A non-zero exit, or any other output, means `council`.' "jira-run step 5: a failing review-mode.sh means council"
+
+t "no Glob or Grep for commands, no pre-approved rg or find, no agent Bash scope (M4a Task 5)"
+for f in "$P"/commands/*.md; do
+  assert_not_contains "$(sed -n '/^allowed-tools:/p' "$f")" 'Glob' "$(basename "$f") allowed-tools has no Glob"
+  assert_not_contains "$(sed -n '/^allowed-tools:/p' "$f")" 'Grep' "$(basename "$f") allowed-tools has no Grep"
+  assert_not_contains "$(cat "$f")" 'Glob' "$(basename "$f") never mentions Glob"
+  assert_not_contains "$(cat "$f")" 'Grep' "$(basename "$f") never mentions Grep"
+done
+assert_not_contains "$(cat "$P/docs/plan-only-flow.md")" 'Glob' "the plan-only flow never mentions Glob"
+assert_not_contains "$(cat "$P/docs/plan-only-flow.md")" 'Grep' "the plan-only flow never mentions Grep"
+assert_eq "$(grep -rnIE 'Bash\((rg|find)' "$P" || true)" "" "no plugin file pre-approves Bash(rg or Bash(find"
+for f in "$P"/agents/*.md; do
+  assert_not_contains "$(sed -n 's/^tools: //p' "$f")" '(' "$(basename "$f") tools line has no scope"
+done
+for a in pr-reviewer pr-reviewer-security pr-reviewer-architecture pr-reviewer-correctness; do
+  assert_eq "$(grep -c '^tools:' "$P/agents/$a.md")" "0" "$a has no tools line"
+  assert_contains "$(cat "$P/agents/$a.md")" 'Search with `grep -rn` or `find` through Bash; `rg` may not be installed.' "$a has the search note"
+done
+for f in "$P"/agents/*.md; do
+  if grep -q '^tools:.*\(Glob\|Grep\)' "$f"; then
+    assert_contains "$(cat "$f")" 'If Glob or Grep is missing, use Read on known paths.' "$(basename "$f") has the fallback note"
+  fi
+done
+assert_contains "$(grep '^allowed-tools:' "$P/commands/review-tour.md")" 'plan-state.sh find-branch:*' "the tour pre-approves find-branch"
+assert_contains "$(cat "$P/commands/review-tour.md")" 'plan-state.sh find-branch <branch>' "the tour calls find-branch"
+assert_contains "$(cat "$P/jira/README.md")" 'verify interactively' "the README notes the allowed-tools lapse"
+
+t "jira-run pre-approves everything the skills it runs pre-approve"
+# A skill run from inside jira-run gets only jira-run's pre-approvals (the 1.7.0 smoke: every
+# implement-prd "plan-state.sh log" call was refused until jira-run listed it).
+jr_tools="$(sed -n 's/^allowed-tools: //p' "$P/commands/jira-run.md" | tr ',' '\n' | sed 's/^ *//')"
+# The skills are jira-run's own Skill(asdlc:<name>) entries, so a new one is checked too.
+jr_skills="$(printf '%s\n' "$jr_tools" | sed -n 's/^Skill(asdlc:\([a-z0-9-]*\))$/\1/p')"
+for sk in implement-prd review-pr; do
+  printf '%s\n' "$jr_skills" | grep -qxF "$sk" && ok || nok "jira-run's Skill entries miss $sk (the list is not being read)"
+done
+for sk in $jr_skills; do
+  if [ -f "$P/commands/$sk.md" ]; then ok; else nok "jira-run runs Skill(asdlc:$sk) but commands/$sk.md is missing"; continue; fi
+  while IFS= read -r rule; do
+    [ -n "$rule" ] || continue
+    if printf '%s\n' "$jr_tools" | grep -qxF -- "$rule"; then ok; else nok "jira-run lacks $sk's pre-approval: $rule"; fi
+  done <<EOF
+$(sed -n 's/^allowed-tools: //p' "$P/commands/$sk.md" | tr ',' '\n' | sed 's/^ *//')
+EOF
+done
+
+t "plan-state.sh find-branch"
+PS="$P/scripts/plan-state.sh"
+sandbox; mkdir plans
+printf '%s\n' '<!-- asdlc' 'ticket: A-1' 'status: pending' 'branch: feature/A-1-x' 'pr:' '-->' '# body' > plans/A-1.plan.md
+printf '%s\n' '<!-- asdlc' 'ticket: A-2' 'status: pending' 'branch: feature/A-2-y' 'pr:' '-->' '# body' 'branch: feature/A-1-x' > plans/A-2.plan.md
+printf '%s\n' '<!-- asdlc' 'ticket: A-3' 'status: pending' 'branch:' 'pr:' '-->' '# body' > plans/A-3.plan.md
+run "$PS" find-branch feature/A-1-x; assert_eq "$CODE/$OUT" "0/plans/A-1.plan.md" "a match prints the one plan (body lines are not read)"
+run "$PS" find-branch feature/A-1; assert_eq "$CODE/$OUT" "1/" "a prefix is not a match"
+run "$PS" find-branch feature/none; assert_eq "$CODE/$OUT" "1/" "no match: exit 1, no output"
+run "$PS" find-branch ""; assert_eq "$CODE" "2" "an empty branch is refused"
+run "$PS" find-branch -x; assert_eq "$CODE" "2" "a branch starting with - is refused"
+run "$PS" find-branch "$(printf 'a\tb')"; assert_eq "$CODE" "2" "a control character is refused"
+run "$PS" find-branch "$(printf 'a\nb')"; assert_eq "$CODE" "2" "a newline is refused"
+run "$PS" find-branch; assert_eq "$CODE" "2" "no argument is refused"
+cp plans/A-1.plan.md plans/A-4.plan.md
+run "$PS" find-branch feature/A-1-x; assert_eq "$CODE/$OUT" "2/" "two plans claiming one branch: exit 2, no path"
+rm plans/A-4.plan.md
+ln -s A-1.plan.md plans/A-5.plan.md
+run "$PS" find-branch feature/A-1-x; assert_eq "$CODE/$OUT" "0/plans/A-1.plan.md" "a symlinked plan file is skipped"
+rm plans/A-5.plan.md
+before="$(cat plans/*.plan.md | cksum)"; run "$PS" find-branch feature/A-2-y; assert_eq "$before" "$(cat plans/*.plan.md | cksum)" "read-only"
+mv plans realplans; ln -s realplans plans
+run "$PS" find-branch feature/A-1-x; assert_eq "$CODE/$OUT" "2/" "a symlinked plans/ is refused"
+
+t "plan-state.sh find-pr"
+sandbox; mkdir plans
+U=https://bitbucket.org/acme/widgets/pull-requests
+printf '%s\n' '<!-- asdlc' 'ticket: A-1' 'status: waiting' 'branch: feature/A-1-x' "pr: $U/7" '-->' '# body' > plans/A-1.plan.md
+printf '%s\n' '<!-- asdlc' 'ticket: A-2' 'status: done' 'branch: feature/A-2-y' "pr: $U/17/" '-->' '# body' "pr: $U/8" > plans/A-2.plan.md
+printf '%s\n' '<!-- asdlc' 'ticket: A-3' 'status: pending' 'branch:' 'pr:' '-->' '# body' > plans/A-3.plan.md
+run "$PS" find-pr 7; assert_eq "$CODE/$OUT" "0/plans/A-1.plan.md" "a match prints the one plan"
+run "$PS" find-pr 17; assert_eq "$CODE/$OUT" "0/plans/A-2.plan.md" "a trailing slash on the recorded pr still matches"
+run "$PS" find-pr 007; assert_eq "$CODE/$OUT" "0/plans/A-1.plan.md" "leading zeros are read as the number"
+run "$PS" find-pr 1; assert_eq "$CODE/$OUT" "1/" "17 is not 1, and 7 is not 17: no match"
+run "$PS" find-pr 8; assert_eq "$CODE/$OUT" "1/" "a pr line in the body is not read"
+for bad in "" -7 7a "1234567890" "$(printf '7\n')x"; do
+  run "$PS" find-pr "$bad"; assert_eq "$CODE" "2" "bad id refused: $(printf '%s' "$bad" | tr -cd '[:print:]')"
+done
+cp plans/A-1.plan.md plans/A-4.plan.md
+run "$PS" find-pr 7; assert_eq "$CODE/$OUT" "2/" "two plans claiming one PR: exit 2, no path"
+rm plans/A-4.plan.md
+assert_contains "$(grep '^allowed-tools:' "$P/commands/review-tour.md")" 'plan-state.sh find-pr:*' "the tour pre-approves find-pr"
+assert_contains "$(cat "$P/commands/review-tour.md")" 'plan-state.sh find-pr <id>' "the tour calls find-pr"
+assert_contains "$(cat "$P/commands/review-tour.md")" 'more than one plan claims it, STOP' "the tour stops when two plans claim the PR"
+assert_not_contains "$(cat "$P/commands/review-tour.md")" 'ask me for the ticket KEY' "the tour does not ask for the KEY when it has a PR id"
 
 finish

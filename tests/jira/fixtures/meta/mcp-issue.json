@@ -1,0 +1,1 @@
+{"issues": {"nodes": [{"key": "PROJ-1", "fields": {"summary": "Synthetic ticket text that meta must never print", "issuetype": {"name": "Bug"}, "labels": ["web", "api"], "description": "Synthetic description.", "comment": {"comments": [], "total": 0, "startAt": 0, "maxResults": 50}}}]}, "context": {"cloudId": "00000000-0000-0000-0000-000000000000"}}

@@ -933,4 +933,76 @@ conf_set JIRA_TRANSPORT bogus; run "$JC" transport; assert_eq "$CODE" "2" "bad t
 run env ASDLC_JIRA_MCP_SERVER='a b' "$JC" transport; assert_eq "$CODE" "2" "bad server"
 run "$JC" transport extra; assert_eq "$CODE" "2" "extra argument"
 
+# ---- meta: the type and labels of the saved issue, for review-mode.sh (D-A5) ----------------
+mk_raw() {  # <KEY> <fixture file> <raw name> [source]
+  mkdir -p "plans/$1/raw"; cp "$FIXTURES/meta/$2" "plans/$1/raw/$3"
+  if [ -n "${4:-}" ]; then printf '{"source":"%s"}\n' "$4" > "plans/$1/raw/fetch.json"; fi
+}
+tabbed() { printf '%s' "$1" | tr '\t' '|'; }
+
+t "meta: REST raw issue prints <type><TAB><labels_csv> and no other ticket text"
+sandbox; mk_raw PROJ-1 rest-issue.json issue.json
+run "$JC" meta PROJ-1; assert_eq "$CODE" "0" "exit"
+assert_eq "$(tabbed "$OUT")" "Story|web,large" "type and labels"
+assert_not_contains "$OUT$ERR" "Synthetic" "no ticket text"
+printf '{"source":"rest"}\n' > plans/PROJ-1/raw/fetch.json
+run "$JC" meta PROJ-1; assert_eq "$(tabbed "$OUT")" "Story|web,large" "with fetch.json naming rest"
+
+t "meta: MCP saved view (the whole tool response, a context block next to the node)"
+sandbox; mk_raw PROJ-1 mcp-issue.json mcp-issue.json mcp
+run "$JC" meta PROJ-1; assert_eq "$CODE" "0" "exit"
+assert_eq "$(tabbed "$OUT")" "Bug|web,api" "type and labels"
+assert_not_contains "$OUT$ERR" "cloudId" "no context block"
+assert_not_contains "$OUT$ERR" "Synthetic" "no ticket text"
+
+t "meta: a tab, newline, quote, dollar or backtick in a value never reaches the output"
+sandbox; mkdir -p plans/PROJ-1/raw
+jq -n '{key:"PROJ-1", fields:{issuetype:{name:"Bu\tg\nX"}, labels:["a\tb","c\nd","e\"f","g$(id)","h`i`","j,k","large","\u001b[31m","é"]}}' > plans/PROJ-1/raw/issue.json
+run "$JC" meta PROJ-1; assert_eq "$CODE" "0" "exit"
+assert_eq "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" "1" "one line"
+assert_eq "$(tabbed "$OUT")" "BugX|ab,cd,ef,gid,hi,jk,large,31m" "unsafe characters dropped"
+assert_eq "$(printf '%s' "$OUT" | tr -d '[:print:]\t' | wc -c | tr -d ' ')" "0" "printable plus one tab"
+assert_eq "$(printf '%s' "$OUT" | tr -cd '\t' | wc -c | tr -d ' ')" "1" "exactly one tab"
+
+t "meta: no value starts with '-', so review-mode.sh never reads a type or label as an option"
+sandbox; mkdir -p plans/PROJ-1/raw
+jq -n '{key:"PROJ-1", fields:{issuetype:{name:"--fixtures"}, labels:["--conf","-x-y","---","$--conf","ok"]}}' > plans/PROJ-1/raw/issue.json
+run "$JC" meta PROJ-1; assert_eq "$CODE" "0" "exit"
+assert_eq "$(tabbed "$OUT")" "fixtures|conf,x-y,conf,ok" "leading dashes dropped, an all-dash label gone"
+mtype="$(printf '%s' "$OUT" | cut -f1)"; mlabels="$(printf '%s' "$OUT" | cut -f2)"
+git commit -q --allow-empty -m base
+run "$S/review-mode.sh" main HEAD "$mtype" "$mlabels"; assert_eq "$CODE" "0" "review-mode.sh takes meta's output"
+case "$OUT" in council|solo) ok ;; *) nok "review-mode.sh printed '$OUT', not a mode" ;; esac
+
+t "meta: at most 200 bytes"
+sandbox; mkdir -p plans/PROJ-1/raw
+jq -n --arg l "$(printf 'l%.0s' $(seq 1 150))" '{key:"PROJ-1", fields:{issuetype:{name:"Task"}, labels:[$l,$l,$l]}}' > plans/PROJ-1/raw/issue.json
+run "$JC" meta PROJ-1; assert_eq "$(printf '%s\n' "$OUT" | wc -c | tr -d ' ')" "200" "at most 200 bytes including the newline"
+assert_eq "$(printf '%s' "$OUT" | cut -c1-5 | tr '\t' '|')" "Task|" "starts with the type"
+
+t "meta: nothing saved (no raw dir, no file, wrong key, bad JSON, no issue type, symlinks) prints an empty line"
+sandbox
+run "$JC" meta PROJ-1; assert_eq "$CODE/$OUT" "0/" "no plans dir"
+mkdir -p plans/PROJ-1/raw; run "$JC" meta PROJ-1; assert_eq "$CODE/$OUT" "0/" "no issue.json"
+mk_raw PROJ-2 rest-issue.json issue.json; run "$JC" meta PROJ-1; assert_eq "$CODE/$OUT" "0/" "other key saved"
+run "$JC" meta PROJ-2; assert_eq "$CODE/$OUT" "0/" "file names PROJ-1, asked PROJ-2"
+printf 'not json' > plans/PROJ-1/raw/issue.json; run "$JC" meta PROJ-1; assert_eq "$CODE/$OUT" "0/" "bad JSON"
+printf '{"key":"PROJ-1","fields":{}}\n' > plans/PROJ-1/raw/issue.json; run "$JC" meta PROJ-1; assert_eq "$CODE/$(tabbed "$OUT")" "0/|" "no type, no labels: just the tab"
+printf '{"source":"mcp"}\n' > plans/PROJ-1/raw/fetch.json; run "$JC" meta PROJ-1; assert_eq "$CODE/$OUT" "0/" "mcp named but no mcp-issue.json"
+rm plans/PROJ-1/raw/fetch.json
+cp "$FIXTURES/meta/rest-issue.json" "$SB/real.json"; rm plans/PROJ-1/raw/issue.json; ln -s "$SB/real.json" plans/PROJ-1/raw/issue.json
+run "$JC" meta PROJ-1; assert_eq "$CODE/$OUT" "0/" "issue.json is a symlink"
+rm -rf plans/PROJ-1; mkdir -p "$SB/elsewhere/raw"; cp "$FIXTURES/meta/rest-issue.json" "$SB/elsewhere/raw/issue.json"; ln -s "$SB/elsewhere" plans/PROJ-1
+run "$JC" meta PROJ-1; assert_eq "$CODE/$OUT" "0/" "plans/<KEY> is a symlink"
+
+t "meta: bad arguments exit 2; it needs no site config and never writes"
+sandbox; mk_raw PROJ-1 rest-issue.json issue.json; rm -f .asdlc/jira.conf
+before="$(find plans -type f | sort | xargs cat | shasum | awk '{print $1}')"
+run "$JC" meta PROJ-1; assert_eq "$CODE/$(tabbed "$OUT")" "0/Story|web,large" "no jira.conf needed"
+assert_eq "$(find plans -type f | sort | xargs cat | shasum | awk '{print $1}')" "$before" "read-only"
+run "$JC" meta; assert_eq "$CODE" "2" "no key"
+run "$JC" meta proj-1; assert_eq "$CODE" "2" "lower-case key"
+run "$JC" meta '../PROJ-1'; assert_eq "$CODE" "2" "path in key"
+run "$JC" meta PROJ-1 extra; assert_eq "$CODE" "2" "extra argument"
+
 finish

@@ -8,6 +8,8 @@ tools: Read, Glob, Grep, Write
 model: opus
 ---
 
+If Glob or Grep is missing, use Read on known paths.
+
 You write the brief a human reads before reviewing a PR. Its job is to point the reader at the code that matters, not to praise the change and not to summarise the AI review.
 
 ## Inputs

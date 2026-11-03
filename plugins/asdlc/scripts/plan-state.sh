@@ -32,6 +32,10 @@
 #   plan-state.sh replan   <plan>            # move the plan to <ID>.plan.prev.md (not while executing)
 #   plan-state.sh progress <plan>            # latest Progress entry per task, ordered by task
 #   plan-state.sh slice    <plan>            # SLICE <k>/<n> tasks <1,2|all>: the slice that runs next (read-only)
+#   plan-state.sh log <plan> <task> <ROLE> <VERDICT> [note]  # append one Progress line (the only writer; below the progress line, hash unchanged)
+#   plan-state.sh report-id <plan>           # <KEY>, or <KEY>-s<k> on slice k > 1: names plans/pr-review-<id>.md (read-only; 16 = no header)
+#   plan-state.sh find-branch <branch>       # print the one ./plans/*.plan.md whose branch header equals <branch> (read-only; 1 = none, 2 = two claim it or a bad branch)
+#   plan-state.sh find-pr <id>               # print the one ./plans/*.plan.md whose pr header ends in /pull-requests/<id> (read-only; same exits)
 # <plan> is a path, or a bare ticket id (no '/', not ending .md) meaning ./plans/<ID>.plan.md.
 #
 # The contract: above the progress line is everything a human signs off on (M2's Critic notes
@@ -72,7 +76,42 @@ set -euo pipefail
 # plan-lib.sh holds the shared helpers (hash, state, validate); approve is in plan-approve.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/plan-lib.sh"
 
-cmd="${1:?usage: plan-state.sh <stamp|check|set|reset-executing|get|validate|replan|progress|slice> <plan|ID> ...}"
+cmd="${1:?usage: plan-state.sh <stamp|check|set|reset-executing|get|validate|replan|progress|slice|report-id|log> <plan|ID>  (or: find-branch <branch> | find-pr <id>) ...}"
+# find-branch and find-pr take a branch or a PR id, not a plan, so they run before the plan argument
+# is read. They read only the header of each ./plans/*.plan.md (hdr_get), print nothing but the one
+# matching path, and refuse a symlinked plans/ (and skip a symlinked plan file). They exist because
+# commands have no file search on newer Claude Code builds. Exit 1 = no match; 2 = refused or ambiguous.
+if [ "$cmd" = find-branch ] || [ "$cmd" = find-pr ]; then
+  [ "$#" -eq 2 ] || die 2 "usage: plan-state.sh find-branch <branch> | find-pr <id>"
+  fb="$2"
+  if [ "$cmd" = find-branch ]; then
+    [ -n "$fb" ] || die 2 "refusing: empty branch"
+    case "$fb" in -*) die 2 "refusing: a branch cannot start with '-'" ;; esac
+    re_ok "$fb" '^[^[:cntrl:]]*$' || die 2 "refusing: the branch contains a control character"
+  else
+    re_ok "$fb" '^[0-9]{1,9}$' || die 2 "refusing: a PR id is 1 to 9 digits"
+    fb="$((10#$fb))"
+  fi
+  [ ! -L plans ] || die 2 "refusing: plans is a symbolic link"
+  fb_hit=""; fb_n=0
+  for fb_f in plans/*.plan.md; do
+    [ -f "$fb_f" ] && [ ! -L "$fb_f" ] || continue
+    has_block "$fb_f" || continue
+    if [ "$cmd" = find-branch ]; then
+      [ "$(hdr_get "$fb_f" branch)" = "$fb" ] || continue
+    else
+      fb_pr="$(hdr_get "$fb_f" pr)"; fb_pr="${fb_pr%/}"
+      case "$fb_pr" in */pull-requests/*) ;; *) continue ;; esac
+      fb_id="${fb_pr##*/pull-requests/}"
+      re_ok "$fb_id" '^[0-9]{1,9}$' && [ "$((10#$fb_id))" -eq "$fb" ] || continue
+    fi
+    fb_hit="$fb_f"; fb_n=$((fb_n + 1))
+  done
+  [ "$fb_n" -le 1 ] || die 2 "refusing: more than one plan claims $( [ "$cmd" = find-pr ] && echo "PR $fb" || echo "branch $fb")"
+  [ "$fb_n" -eq 1 ] || exit 1
+  printf '%s\n' "$fb_hit"
+  exit 0
+fi
 plan="${2:?plan file or ticket id required}"
 # A bare ID (no '/', not ending .md) means ./plans/<ID>.plan.md; it must look like a ticket id.
 case "$plan" in
@@ -224,6 +263,54 @@ case "$cmd" in
     has_block "$plan" || die 16 "no header block in $plan — run 'plan-state.sh stamp' first"
     slice_info || exit 2
     echo "SLICE $SL_CUR/$SL_N tasks $SL_TASKS"
+    ;;
+  log)
+    # The only writer of Progress lines. The orchestrator calls it with the verdict an agent returned;
+    # agents never edit the plan. One line is appended at the very end of the file, which is always
+    # below the progress line, so the approved part and its hash are untouched. Same temp-and-move
+    # write as write_field. Usage: log <plan> <task> <ROLE> <VERDICT> [note]
+    [ -f "$plan" ] || die 2 "no such plan: $plan"
+    [ "$#" -ge 5 ] || die 2 "usage: plan-state.sh log <plan> <task> <ROLE> <VERDICT> [note]"
+    lg_task="$3"; lg_role="$4"; lg_verd="$5"; lg_note="${6-}"
+    case "$lg_role $lg_verd" in
+      "EXECUTOR DONE"|"EXECUTOR BLOCKED"|"REVIEW APPROVED"|"REVIEW CHANGES_REQUESTED"|"TEST PASS"|"TEST FAIL") ;;
+      *) die 2 "refusing: '$lg_role $lg_verd' is not one of: EXECUTOR DONE, EXECUTOR BLOCKED, REVIEW APPROVED, REVIEW CHANGES_REQUESTED, TEST PASS, TEST FAIL" ;;
+    esac
+    [ "$#" -le 6 ] || die 2 "refusing: one note argument only (quote it)"
+    if has_eol "$lg_task" || ! re_ok "$lg_task" '^[1-9][0-9]{0,3}$'; then die 2 "refusing: the task must be a whole number like 3"; fi
+    re_ok "$lg_note" '^[^[:cntrl:]]*$' || die 2 "refusing: the note contains a newline or a control character"
+    has_block "$plan" || die 16 "no header block in $plan — run 'plan-state.sh stamp' first"
+    [ "$(progress_count "$plan")" -eq 1 ] || die 2 "refusing: $plan has no single '$PROGRESS' line (stamp adds it)"
+    lg_part="$(body_of "$plan" | approved_part)"
+    printf '%s\n' "$lg_part" | LGN="$lg_task" awk '$0 ~ ("^### Task " ENVIRON["LGN"] "([^0-9]|$)") {f=1} END {exit !f}' \
+      || die 2 "refusing: $plan has no '### Task $lg_task' above its progress line"
+    # Cut at 300 bytes, then drop a multibyte character the cut split (agents write em dashes) and any
+    # other invalid byte: a broken line makes awk fail in check. iconv -c exits 1 when it dropped bytes,
+    # so keep its output anyway. With no iconv, keep printable ASCII only.
+    lg_note="$(printf '%s' "$lg_note" | LC_ALL=C cut -b1-300)"
+    if command -v iconv >/dev/null 2>&1; then
+      lg_note="$(printf '%s' "$lg_note" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || true)"
+    else
+      lg_note="$(printf '%s' "$lg_note" | LC_ALL=C tr -cd ' -~')"
+    fi
+    # Nothing valid left (an empty note, or invalid bytes only): log "no note", never the raw bytes.
+    [ -n "$lg_note" ] || lg_note="no note"
+    otmp="$(mktemp)"
+    { cat "$plan"
+      if [ -n "$(tail -c1 "$plan")" ]; then echo; fi
+      printf -- '- Task %s: %s %s — %s\n' "$lg_task" "$lg_role" "$lg_verd" "$lg_note"; } > "$otmp"
+    mv "$otmp" "$plan"
+    echo "logged Task $lg_task: $lg_role $lg_verd"
+    ;;
+  report-id)
+    # The id that names this plan's review report, plans/pr-review-<id>.md, and its review-pr --id:
+    # <KEY>, or <KEY>-s<k> on slice k > 1. Read-only. The one place this rule is written down.
+    [ -f "$plan" ] || die 2 "no such plan: $plan"
+    has_block "$plan" || die 16 "no header block in $plan — run 'plan-state.sh stamp' first"
+    slice_hdr_ok || die 2 "the slice header is not a whole number from 1 to 999"
+    rid_key="$(hdr_get "$plan" ticket)"; [ -n "$rid_key" ] || rid_key="$(basename "$plan" .plan.md)"
+    rid_k="$(hdr_get "$plan" slice)"; [ -n "$rid_k" ] || rid_k=1
+    if [ "$((10#$rid_k))" -gt 1 ]; then echo "$rid_key-s$((10#$rid_k))"; else echo "$rid_key"; fi
     ;;
   validate)
     [ -f "$plan" ] || die 2 "no such plan: $plan"

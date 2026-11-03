@@ -281,7 +281,7 @@ assert_contains "$(head -5 "$JR")" "scripts/review-report.sh:*" "allowed-tools h
 assert_not_contains "$(head -5 "$JR" | sed 's/review-record\.sh last:\*//')" "review-record" "no record script pre-approved except last"
 assert_eq "$(grep -n 'review-record.sh add' "$JR" | grep -v 'Never run' | wc -l | tr -d ' ')" "0" "never runs add"
 assert_contains "$(cat "$JR")" "[asdlc] AI review (not a human review):" "AI summary marker"
-assert_contains "$(cat "$JR")" "--id <KEY>" "review-pr gets --id"
+assert_contains "$(cat "$JR")" "--id <ID>" "review-pr gets --id"
 assert_contains "$(cat "$JR")" "AI-approved, awaiting your human review (tier <t>: <reasons>)" "D-H10 line"
 assert_not_contains "$(cat "$JR")" "approved, awaiting merge" "old line gone"
 

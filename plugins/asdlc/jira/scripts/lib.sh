@@ -353,65 +353,11 @@ asdlc_send_json() {  # <jira|bb> <METHOD> <path> <json>
 # "A, B ,C" -> one trimmed, non-empty item per line.
 asdlc_split_csv() { printf '%s' "$1" | tr ',' '\n' | while IFS= read -r i || [ -n "$i" ]; do i="$(asdlc_trim "$i")"; [ -n "$i" ] && printf '%s\n' "$i"; done; return 0; }
 
-# --- MCP writes: consuming the captures of a request (see jira-context.sh mcp-request) -------
+# --- MCP requests: the library (open a request, read it, pick the capture) ----------------------
 # Can the REST API be used? A Jira login is set (fixture mode counts, for the tests).
 asdlc_rest_ready() { [ -n "${ASDLC_FIXTURES:-}" ] || { [ -n "${JIRA_EMAIL:-}" ] && [ -n "${JIRA_TOKEN:-}" ]; }; }
-
-# The host of JIRA_BASE_URL, which the Atlassian MCP accepts as its cloudId.
-asdlc_mcp_cloud() { local h="${JIRA_BASE_URL#https://}"; printf '%s' "${h%%[:/]*}"; }
-
-# Read the captures of plans/<KEY>/.mcp for <purpose> into <outdir>/<role>.json (the stored
-# response of each role: "issue" is getJiraIssue, any other role is the tool's own name).
-# A capture counts only if its nonce is the request's, it came from the request's server and
-# tool, it is not older than the request, and (for the issue) it is for <KEY>; the request must
-# be for <purpose>, be about <KEY> and not have expired. The newest valid capture per role wins.
-# The captures are deleted once read (use once); the request stays, for asdlc_mcp_close. Never
-# exits: returns 1 with MCP_WHY set. On success MCP_SERVER is the request's server name.
-asdlc_mcp_take() {  # <KEY> <purpose> <outdir> <role>...
-  local key="$1" purpose="$2" out="$3" dir req line v rkey rp nonce created expires role tool f e best beste
-  shift 3
-  MCP_WHY=""; MCP_SERVER=""
-  dir="plans/$key/.mcp"; req="$dir/request.json"
-  if [ -L plans ] || [ -L "plans/$key" ] || [ -L "$dir" ] || [ -L "$req" ]; then
-    MCP_WHY="refusing: plans/, plans/$key or its .mcp is a symbolic link"; return 1
-  fi
-  [ -f "$req" ] || { MCP_WHY="no open MCP request for $key; open one first, make the calls it printed, then retry"; return 1; }
-  line="$(jq -r '[.v, .key, .purpose, .server, .nonce, .created_epoch, .expires_epoch] | map(tostring) | join(" ")' "$req" 2>/dev/null)" || line=""
-  read -r v rkey rp MCP_SERVER nonce created expires <<<"$line" || true
-  if ! { [ "${v:-}" = 1 ] && [ "${rkey:-}" = "$key" ] && [[ ${MCP_SERVER:-} =~ ^[A-Za-z0-9_-]+$ ]] &&
-         [[ ${nonce:-} =~ ^[0-9a-f]{8,64}$ ]] && [[ ${created:-} =~ ^[0-9]+$ ]] && [[ ${expires:-} =~ ^[0-9]+$ ]]; }; then
-    MCP_WHY="the MCP request for $key is unreadable; open a new one"; return 1
-  fi
-  [ "$rp" = "$purpose" ] || { MCP_WHY="the open MCP request for $key is for $rp, not $purpose; open a new one"; return 1; }
-  [ "$expires" -gt "$(date +%s)" ] || { MCP_WHY="the MCP request for $key has expired; open a new one"; return 1; }
-  mkdir -p "$out"
-  for role in "$@"; do
-    tool="mcp__${MCP_SERVER}__$role"; [ "$role" != issue ] || tool="mcp__${MCP_SERVER}__getJiraIssue"
-    best=""; beste=-1
-    for f in "$dir"/cap-*.json; do
-      [ -f "$f" ] && [ ! -L "$f" ] || continue
-      e="$(jq -r --arg n "$nonce" --argjson c "$created" --arg tool "$tool" --arg role "$role" --arg k "$key" '
-            select(type == "object" and .nonce == $n and .tool_name == $tool and .role == $role
-                   and (.captured_epoch | type) == "number" and .captured_epoch >= $c
-                   and (.response | type) != "null"
-                   and ($role != "issue" or (((.response.issues.nodes // []) | length) == 1 and .response.issues.nodes[0].key == $k)))
-            | .captured_epoch | floor' "$f" 2>/dev/null)" || continue
-      [[ $e =~ ^[0-9]+$ ]] || continue
-      if [ "$e" -gt "$beste" ] || { [ "$e" = "$beste" ] && [[ $f > $best ]]; }; then best="$f"; beste="$e"; fi
-    done
-    [ -n "$best" ] || { MCP_WHY="no valid $role capture of $key under the open MCP request (a capture from another or an older request is ignored)"; return 1; }
-    case "$role" in issue) jq -c '.response.issues.nodes[0]' "$best" > "$out/$role.json" 2>/dev/null ;; *) jq -c '.response' "$best" > "$out/$role.json" 2>/dev/null ;; esac ||
-      { MCP_WHY="could not read the $role capture of $key"; return 1; }
-  done
-  rm -f "$dir"/cap-*.json
-}
-
-# Drop the request of <KEY> (and any capture still there): nothing more is expected of it.
-asdlc_mcp_close() {  # <KEY>
-  local dir="plans/$1/.mcp"
-  [ -L plans ] || [ -L "plans/$1" ] || [ -L "$dir" ] && return 0
-  rm -f "$dir"/request.json "$dir"/cap-*.json; rmdir "$dir" 2>/dev/null || true
-}
+. "$ASDLC_JIRA_SCRIPTS/mcp-lib.sh"
+. "$ASDLC_JIRA_SCRIPTS/review-lib.sh"   # need_key/need_dir, pr id, hunk grammar (shared by the review scripts)
 
 # ---- Bitbucket over MCP (the seam, D-M7) -------------------------------------------------------
 # BB_TRANSPORT=rest (default) is the token path. BB_TRANSPORT=mcp needs a profile for the team's
@@ -456,7 +402,7 @@ asdlc_bb_mcp_check() {
 # Open a request for <op> (open_pr|pr_comment) with the placeholder values in <vars-json>, and print
 # the one call to make: {"tool":"mcp__<server>__<tool>","args":{...}}. Dies on a bad setup.
 asdlc_bb_mcp_open() {  # <op> <vars-json>
-  local op="$1" vars="$2" dir=plans/.mcp/bb now nonce rtmp args
+  local op="$1" vars="$2" dir=plans/.mcp/bb args extra
   asdlc_bb_mcp_check || exit 2
   [ "$BB_TRANSPORT" = mcp ] || { echo "BB_TRANSPORT is rest: the --mcp-args and --from-mcp options need BB_TRANSPORT=mcp" >&2; exit 2; }
   [ -n "$BB_WORKSPACE" ] || asdlc_die "BB_WORKSPACE is not set in $ASDLC_CONF_FILE"
@@ -465,44 +411,23 @@ asdlc_bb_mcp_open() {  # <op> <vars-json>
   args="$(jq -c --argjson v "$vars" --arg op "$op" '
       def fill: if type == "string" and test("^\\{[a-z_]+\\}$") then ($v[.[1:-1]] // error("unknown placeholder " + .)) else . end;
       .[$op].args | walk(fill)' "$BBM_PROFILE_FILE")" || asdlc_die "the profile's $op arguments could not be filled in"
-  if [ -L plans ] || [ -L plans/.mcp ] || [ -L "$dir" ]; then asdlc_die "refusing: plans/, plans/.mcp or $dir is a symbolic link"; fi
-  mkdir -p "$dir"; rm -f "$dir"/request.json "$dir"/cap-*.json
-  now=$(date +%s); nonce="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
-  rtmp="$(mktemp "$dir/.request.XXXXXX")"
-  jq -n --arg op "$op" --arg server "$BBM_SERVER" --arg nonce "$nonce" --argjson now "$now" --argjson args "$args" --slurpfile p "$BBM_PROFILE_FILE" \
-        '{v: 1, kind: "bb", op: $op, server: $server, tool: $p[0][$op].tool, nonce: $nonce, created_epoch: $now,
-          expires_epoch: ($now + 600), args: $args, id_path: $p[0][$op].response.id, url_path: $p[0][$op].response.url}' > "$rtmp" \
-    || { rm -f "$rtmp"; asdlc_die "could not write the Bitbucket request"; }
-  mv "$rtmp" "$dir/request.json"
+  extra="$(jq -nc --arg op "$op" --argjson args "$args" --slurpfile p "$BBM_PROFILE_FILE" \
+        '{op: $op, tool: $p[0][$op].tool, args: $args, id_path: $p[0][$op].response.id, url_path: $p[0][$op].response.url}')" ||
+    asdlc_die "could not write the Bitbucket request"
+  mcp_request_open "$dir" bb "$BBM_SERVER" "$extra" || asdlc_die "$MCP_WHY"
   jq -c '{tool: ("mcp__" + .server + "__" + .tool), args: .args}' "$dir/request.json"
 }
 
 # Read the capture of the open <op> request and print "<id> <url>" (the REST contract); the request
 # and captures are used up. Returns 1 with the reason on stderr when there is nothing valid.
 asdlc_bb_mcp_take() {  # <op>
-  local op="$1" dir=plans/.mcp/bb req=plans/.mcp/bb/request.json line v kind rop server tool nonce created expires f e best="" beste=-1 out
+  local op="$1" dir=plans/.mcp/bb best out
   asdlc_bb_mcp_check || return 1
   [ "$BB_TRANSPORT" = mcp ] || { echo "BB_TRANSPORT is rest: the --mcp-args and --from-mcp options need BB_TRANSPORT=mcp" >&2; return 1; }
-  if [ -L plans ] || [ -L plans/.mcp ] || [ -L "$dir" ] || [ -L "$req" ]; then echo "refusing: plans/, plans/.mcp or $dir is a symbolic link" >&2; return 1; fi
-  [ -f "$req" ] || { echo "no open Bitbucket MCP request; run with --mcp-args, make the call it prints, then retry" >&2; return 1; }
-  line="$(jq -r '[.v, .kind, .op, .server, .tool, .nonce, .created_epoch, .expires_epoch] | map(tostring) | join(" ")' "$req" 2>/dev/null)" || line=""
-  read -r v kind rop server tool nonce created expires <<<"$line" || true
-  if ! { [ "${v:-}" = 1 ] && [ "${kind:-}" = bb ] && [[ ${nonce:-} =~ ^[0-9a-f]{8,64}$ ]] && [[ ${created:-} =~ ^[0-9]+$ ]] &&
-         [[ ${expires:-} =~ ^[0-9]+$ ]] && [ "${server:-}" = "$BBM_SERVER" ]; }; then
-    echo "the Bitbucket MCP request is unreadable (or for another server); open a new one with --mcp-args" >&2; return 1
-  fi
-  [ "$rop" = "$op" ] || { echo "the open Bitbucket MCP request is for $rop, not $op; open a new one" >&2; return 1; }
-  [ "$expires" -gt "$(date +%s)" ] || { echo "the Bitbucket MCP request has expired; open a new one with --mcp-args" >&2; return 1; }
-  for f in "$dir"/cap-*.json; do
-    [ -f "$f" ] && [ ! -L "$f" ] || continue
-    e="$(jq -r --arg n "$nonce" --argjson c "$created" --arg t "mcp__${server}__${tool}" '
-          select(type == "object" and .nonce == $n and .tool_name == $t and .role == "bb"
-                 and (.captured_epoch | type) == "number" and .captured_epoch >= $c
-                 and (.response.id | type) == "string" and (.response.id | test("^[0-9]{1,18}$")))
-          | .captured_epoch | floor' "$f" 2>/dev/null)" || continue
-    [[ $e =~ ^[0-9]+$ ]] || continue
-    if [ "$e" -gt "$beste" ] || { [ "$e" = "$beste" ] && [[ $f > $best ]]; }; then best="$f"; beste="$e"; fi
-  done
+  mcp_request_load "$dir/request.json" "Bitbucket MCP request" bb "with --mcp-args" || { echo "$MCP_WHY" >&2; return 1; }
+  [ "$MCP_SERVER" = "$BBM_SERVER" ] || { echo "the Bitbucket MCP request is for another server; open a new one with --mcp-args" >&2; return 1; }
+  [ "$MCP_OP" = "$op" ] || { echo "the open Bitbucket MCP request is for $MCP_OP, not $op; open a new one" >&2; return 1; }
+  best="$(mcp_pick_capture "$dir" "$MCP_NONCE" "$MCP_CREATED" "mcp__${MCP_SERVER}__${MCP_TOOL}" bb "" "$MCP_FILTER_BB")"
   [ -n "$best" ] || { echo "no valid capture under the open Bitbucket MCP request (make the call --mcp-args printed, with exactly those args)" >&2; return 1; }
   out="$(jq -r '"\(.response.id) \(.response.url // "")"' "$best" 2>/dev/null)" || { echo "could not read the capture" >&2; return 1; }
   if [ "$op" = open_pr ] && [ "${out#* }" = "" ]; then echo "the capture holds no PR URL (check response.url in the profile)" >&2; return 1; fi

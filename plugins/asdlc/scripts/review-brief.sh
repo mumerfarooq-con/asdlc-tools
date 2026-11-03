@@ -27,13 +27,7 @@ MAX_BYTES=12288
 MAX_HUNK_ROWS=5
 
 die2() { echo "review-brief: $*" >&2; exit 2; }
-need_key() { asdlc_is_key "${1:-}" || die2 "'${1:-}' is not a ticket key like PROJ-1"; }
-need_dir() {  # <KEY> -> prints plans/<KEY>; refuses a symlinked plans or plans/<KEY>
-  local d="plans/$1"
-  [ ! -L plans ] || die2 "plans is a symlink"
-  [ ! -L "$d" ] || die2 "$d is a symlink"
-  printf '%s' "$d"
-}
+# asdlc_need_key and asdlc_need_dir (review-lib.sh) report through die2.
 bad_ref() { case "$1" in -*) die2 "invalid ref '$1': must not start with '-'" ;; esac; }
 resolve() {  # <ref> -> full sha, or exit 2
   local s
@@ -50,7 +44,7 @@ cmd_diff() {
     [ $# -eq 2 ] && [ "$1" = --since ] || die2 "usage: review-brief.sh diff <KEY> <base> <head> [--since <sha>]"
     since="$2"
   fi
-  need_key "$KEY"
+  asdlc_need_key "$KEY"
   local bsha hsha ssha="" from dir out tmp mb
   bsha="$(resolve "$base")"; hsha="$(resolve "$head")"
   [ -z "$since" ] || ssha="$(resolve "$since")"
@@ -59,7 +53,7 @@ cmd_diff() {
     mb="$(git merge-base "$bsha" "$hsha" 2>/dev/null)" || die2 "no merge base between '$base' and '$head'"
     from="$mb"
   fi
-  dir="$(need_dir "$KEY")"
+  dir="$(asdlc_need_dir "$KEY")"
   mkdir -p "$dir"
   out="$dir/review.diff"
   [ ! -L "$out" ] || die2 "$out is a symlink"
@@ -93,9 +87,9 @@ cmd_check() {
   [ $# -ge 1 ] || die2 "usage: review-brief.sh check <KEY> [--rereview]"
   shift
   if [ $# -gt 0 ]; then [ $# -eq 1 ] && [ "$1" = --rereview ] || die2 "usage: review-brief.sh check <KEY> [--rereview]"; rereview=1; fi
-  need_key "$KEY"
+  asdlc_need_key "$KEY"
   local dir f
-  dir="$(need_dir "$KEY")"
+  dir="$(asdlc_need_dir "$KEY")"
   f="$dir/review-brief.md"
   invalid() { echo "BRIEF invalid: $*"; exit 2; }
   [ ! -L "$f" ] || invalid "review-brief.md is a symlink"

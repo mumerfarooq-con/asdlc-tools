@@ -1,7 +1,7 @@
 ---
 description: Execute approved Jira plans, then plan new tickets (batched, file-based approval)
 argument-hint: "[PROJECT] | --key K | --sprint active|<id>|\"Name\" | --status \"A,B\" | --plan-only | --execute-only | --reset-executing"
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh slice:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh lock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh unlock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh reset-executing:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh start-branch:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh next-slice:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-queue.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-report.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-brief.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-record.sh last:*), Bash(git status:*), Bash(git add:*), Bash(ls:*), Skill(asdlc:implement-prd), Skill(asdlc:review-pr), Read, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh stamp:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh report-id:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh progress:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh log:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh slice:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact-scan.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh lock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh unlock:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh reset-executing:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh start-branch:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh next-slice:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-queue.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-report.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-brief.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-record.sh last:*), Bash(git status:*), Bash(git add:*), Bash(ls:*), Skill(asdlc:implement-prd), Skill(asdlc:review-pr), Read, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue
 ---
 
 # /asdlc:jira-run
@@ -14,8 +14,9 @@ Atlassian MCP rule, for every step below: call an Atlassian MCP tool ONLY with t
 printed (or that the capture hook's receipt tells you to use), unchanged, and never read its raw
 output. While a request is open, the plugin's hook stores the response and shows you a receipt
 (counts, no ticket text); the scripts read what was stored. The only Atlassian write you may make is the
-one a script printed (`transitionJiraIssue`, or the comment of "Jira writes over MCP" with my confirmation);
+one a script printed (`transitionJiraIssue`, or the comment of "Jira over MCP" with my confirmation);
 never call `editJiraIssue`, `createJiraIssue` or a worklog tool here.
+(The capture protocol is written once, in `jira/README.md` under "Capture protocol".)
 
 Scripts live in `${CLAUDE_PLUGIN_ROOT}/jira/scripts/`. Always call them by that full path, as written
 below; run them from the repo root. They read the project's `.asdlc/jira.conf` and the token env vars.
@@ -46,6 +47,10 @@ below; run them from the repo root. They read the project's `.asdlc/jira.conf` a
   Everything else is a *selection* to hand to jira-mine in Phase B.
 
 ## Phase A — execute approved plans   (skip if --plan-only)
+Phase A has five parts, in this order: *Review queue*, *Which plans run*, *Stale check*, *Run a plan* and
+*After APPROVE: brief, then AI summary*. Each part says where to go next.
+
+### Review queue
 First the review queue, before any `start-branch`: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-queue.sh` (read-only; keep
 its output for the Report). It prints `QUEUE <waiting>/<max>` and one `PR <id> <KEY> ...` line per PR still waiting for my
 human review (`REVIEW_QUEUE_MAX`, default 3, 0 = no cap).
@@ -55,10 +60,11 @@ human review (`REVIEW_QUEUE_MAX`, default 3, 0 = no cap).
 - `review-queue.sh` exit 0 → carry on. Run `review-queue.sh` again after each PR you open (step 4): exit 18 → stop Phase A there, and report the
   plans you did not run as "<KEY>: not run — review queue full".
 
+### Which plans run
 List plan files: `ls ./plans/*.plan.md`. For each, run
 `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh check <plan>` and act on the word it prints:
 - `RUNNABLE` → run `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh validate <plan>`. `VALID` → implement
-  it, after the stale check below. `INVALID` → skip; report "<KEY>: plan doesn't validate — re-plan".
+  it, after the *Stale check* below. `INVALID` → skip; report "<KEY>: plan doesn't validate — re-plan".
 - `EDITED` → skip; report "<KEY>: plan edited since approval — re-approve".
 - `STALE` → skip; report "<KEY>: ticket changed since approval — re-plan". Phase B re-plans it (in this run, or in the next planning run under `--execute-only`).
 - `NEEDS_INFO` `BLOCKED` → skip; report "<KEY>: <word>".
@@ -67,21 +73,20 @@ List plan files: `ls ./plans/*.plan.md`. For each, run
   Otherwise run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh next-slice <plan>` (read-only against Bitbucket; it moves the plan
   on only if Bitbucket says that PR is MERGED, and never otherwise):
   - `next-slice` exit 0 → the plan is on its next slice and `check` now prints `RUNNABLE`. Treat it as RUNNABLE from the top: `validate`, the
-    stale check below (it runs before EVERY slice), then implement it (`<k>` = its new slice).
+    *Stale check* below (it runs before EVERY slice), then continue at *Run a plan* (`<k>` = its new slice).
   - `next-slice` exit 19 → skip; report "<KEY>: slice <k> PR not merged yet" (with the reason it printed).
   - `next-slice` exit 11 → skip; report "<KEY>: plan edited since approval — re-approve". Any other exit → report what it says, next plan.
 - `EXECUTING` `PENDING` `DONE` `FAILED` `SKIP` `MISSING` → skip (mention EXECUTING/FAILED, stay quiet on the rest).
 
-Stale check, for each plan that is RUNNABLE and VALID, before anything else is done for it:
+### Stale check
+For each plan that is RUNNABLE and VALID, before anything else is done for it:
 - If the plan's source is `mcp` (`${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get <plan> fingerprint_source`),
-  first run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh mcp-request <KEY> --for check`. It prints one
-  JSON line `{"tool":…,"args":{…}}`; call that tool once with those args. (If MCP is not available,
-  skip both: the check below then gives UNCHECKED. A plan made over MCP is never checked over REST.)
+  first do the "Check read" of "Jira over MCP" for `<KEY>`.
   A plan whose source is `rest` is checked over REST as always, whatever `<TRANSPORT>` is.
 - Then run
 `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh check <plan>`. It prints one verdict line, never ticket
 text. Never run a plan unless it is RUNNABLE, VALID and FRESH.
-- `jira-context.sh check` `FRESH` (exit 0) → implement it (steps below).
+- `jira-context.sh check` `FRESH` (exit 0) → implement it: continue at *Run a plan*.
 - `jira-context.sh check` `STALE <summary>` (exit 17) → the plan is now `stale` and its `.prev` and `changes.md` exist. Do not
   run it. Report "<KEY>: ticket changed since approval — <summary>", adding the `branch: <name>` line if
   the check printed one (work was already done on it). Queue the plan for Phase B (under `--execute-only`
@@ -90,9 +95,10 @@ text. Never run a plan unless it is RUNNABLE, VALID and FRESH.
 - `jira-context.sh check` exit 2 → do not run it; relay the message. A plan with no fingerprint (approved before 1.4.0, or not
   a Jira plan) is reported as "<KEY>: no ticket fingerprint — re-plan".
 
+### Run a plan
 To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field, read with `plan-state.sh get <plan> ticket`):
 0. Read the slice: `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh slice <plan>` prints `SLICE <k>/<n> tasks <list|all>`. Keep `<k>` and `<n>`.
-   `<ID>` is `<KEY>` when `<k>` is 1, and `<KEY>-s<k>` when `<k>` > 1: it names the review report, `plans/pr-review-<ID>.md`.
+   `<ID>` is the line `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh report-id <plan>` prints: it names the review report, `plans/pr-review-<ID>.md`.
    A plan with no slices section is `1/1`, exactly as before. One run does ONE slice per plan: one branch, one PR.
 1. `${CLAUDE_PLUGIN_ROOT}/jira/scripts/run-state.sh start-branch <plan> "<summary>"` → prints the branch: keep it as `<BRANCH>`.
    - A plan with no branch yet gets a new `feature/<KEY>-<slug>` (`feature/<KEY>-<slug>-s<k>` for slice 2 and later) off an up-to-date
@@ -104,7 +110,7 @@ To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field,
    - `start-branch` exit 15 (progress logged on a gone or cleared branch) → report it, next plan. The plan needs
      a re-stamp and my re-approval; never clear its log or branch yourself.
    - `start-branch`, any other non-zero exit (2 refusal, 1 git failure) → report what it says, next plan.
-2. Move the ticket to In Progress (see "Jira writes over MCP" below for the `mcp` form):
+2. Move the ticket to In Progress (under `mcp`, use the "Transition" of "Jira over MCP"):
    `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh <KEY> :in-progress`
 3. Run `/asdlc:implement-prd <plan> --execute` (Skill tool). It re-runs the gate and itself sets the
    plan to `executing`; you don't set it. It runs only the current slice's tasks and leaves the plan `executing`
@@ -128,27 +134,15 @@ To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field,
    - Only when no PR is recorded: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-open-pr.sh <BRANCH> "<KEY> <summary>"`
      → capture `<PR_ID> <PR_URL>`, then at once
      `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> pr <PR_URL>`
-5. Decide review depth from the DIFF, not a guess:
+5. Decide review depth from the DIFF, not a guess. First get the ticket's type and labels:
+   `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh meta <KEY>` prints `<issue_type>`, a tab, then `<labels_csv>` (an empty line
+   = nothing saved: use empty strings). Use them as they are; it prints no other ticket text. Then:
    `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh <TARGET_BRANCH> HEAD "<issue_type>" "<labels_csv>"`
    → prints `council` or `solo` (council when many files/lines changed, a sensitive path is
-   touched, or the ticket is Epic/Story/large). Run `/asdlc:review-pr <BRANCH> <TARGET_BRANCH> --id <KEY>` (for slice 2 and later, `--id <KEY>-s<k>`, i.e. `--id <ID>`),
+   touched, or the ticket is Epic/Story/large). A non-zero exit, or any other output, means `council`. Run `/asdlc:review-pr <BRANCH> <TARGET_BRANCH> --id <ID>`,
    appending ` --council` when the mode is `council`. (`--id` names the report `plans/pr-review-<ID>.md`.)
    - REQUEST_CHANGES → executor fixes on the SAME plan (max 2 cycles), commit, push, re-run the review.
-   - APPROVE → the reviewer brief first, then the AI summary. The brief must be the FIRST PR comment: nothing
-     earlier in this run posts a comment on the PR. Never Read the brief or the diff; pass them as paths only.
-     1. Diff file: `${CLAUDE_PLUGIN_ROOT}/scripts/review-brief.sh diff <KEY> origin/<TARGET_BRANCH> <BRANCH>`. On a resumed plan
-        that already has a human-review record, add `--since <sha>` with the sha from
-        `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-record.sh last <KEY> <PR_ID>` (nothing printed = no record, no `--since`).
-        It prints the path and counts, no diff text.
-     2. Run the `review-brief` agent with only these paths: the plan, `./plans/<KEY>/context.md`, `./plans/pr-review-<ID>.md`
-        (it may be missing), `./plans/<KEY>/review.diff` and, with `--since`, that sha. Then
-        `${CLAUDE_PLUGIN_ROOT}/scripts/review-brief.sh check <KEY>` (add `--rereview` when you used `--since`). It prints counts, never the brief.
-        Exit 2 → run the agent once more, then check again; still exit 2 → report "<KEY>: reviewer brief invalid — not posted" and post nothing.
-     3. (confirm) post the brief: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-pr-comment.sh <PR_ID> --file plans/<KEY>/review-brief.md`.
-     4. (confirm) post the AI summary. It is an AI review, not a human one, and it says so:
-        `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-pr-comment.sh <PR_ID> "[asdlc] AI review (not a human review): <summary>"`.
-     (`bb-pr-comment.sh` refuses text that does not start with `[asdlc] `.) Never run `review-record.sh add`: only my own
-     `/asdlc:review-tour` records a human review.
+   - APPROVE → do *After APPROVE: brief, then AI summary* (below, after step 6), then step 6.
 6. Status: if `<k>` < `<n>`, `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status waiting` (the PR is recorded, and the
    next slice waits for its merge), and do NOT set `done`. Otherwise (the last slice, or no slices)
    `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh set <plan> status done`.
@@ -159,15 +153,30 @@ To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field,
    When `<n>` > 1 add ` — slice <k> of <n>`; for `<k>` < `<n>` also "next slice starts in a later run, after this PR is merged".
    The ticket moves to Testing on MERGE (Jira automation), not here.
 
+### After APPROVE: brief, then AI summary
+Reached from step 5 of *Run a plan* on APPROVE. The reviewer brief first, then the AI summary. The brief must be the FIRST PR comment: nothing
+earlier in this run posts a comment on the PR. Never Read the brief or the diff; pass them as paths only.
+1. Diff file: `${CLAUDE_PLUGIN_ROOT}/scripts/review-brief.sh diff <KEY> origin/<TARGET_BRANCH> <BRANCH>`. On a resumed plan
+   that already has a human-review record, add `--since <sha>` with the sha from
+   `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-record.sh last <KEY> <PR_ID>` (nothing printed = no record, no `--since`).
+   It prints the path and counts, no diff text.
+2. Run the `review-brief` agent with only these paths: the plan, `./plans/<KEY>/context.md`, `./plans/pr-review-<ID>.md`
+   (it may be missing), `./plans/<KEY>/review.diff` and, with `--since`, that sha. Then
+   `${CLAUDE_PLUGIN_ROOT}/scripts/review-brief.sh check <KEY>` (add `--rereview` when you used `--since`). It prints counts, never the brief.
+   Exit 2 → run the agent once more, then check again; still exit 2 → report "<KEY>: reviewer brief invalid — not posted" and post nothing.
+3. (confirm) post the brief: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-pr-comment.sh <PR_ID> --file plans/<KEY>/review-brief.md`.
+4. (confirm) post the AI summary. It is an AI review, not a human one, and it says so:
+   `${CLAUDE_PLUGIN_ROOT}/jira/scripts/bb-pr-comment.sh <PR_ID> "[asdlc] AI review (not a human review): <summary>"`.
+(`bb-pr-comment.sh` refuses text that does not start with `[asdlc] `.) Never run `review-record.sh add`: only my own
+`/asdlc:review-tour` records a human review.
+
+Then go on to step 6 of *Run a plan*.
+
 ## Phase B — plan new tickets   (skip if --execute-only)
 - Fetch tickets, where `<selection>` is the arguments with the phase flags removed. (No selection →
   my `STATUS_DEFAULT` tickets in `JIRA_PROJECT_KEY`.)
   - `rest`: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh <selection>`.
-  - `mcp`: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh --mcp-args <selection>` prints one
-    `{"tool":…,"args":{…}}` line; call that tool once with those args, then run
-    `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh --from-mcp <selection>` (the same selection). It
-    prints the same JSON list as the `rest` form, and warns on stderr about a second page or an empty
-    result (relay the warning).
+  - `mcp`: do the "Search" of "Jira over MCP", with this selection.
 - The work list is every plan that is STALE (from Phase A, or any `./plans/*.plan.md` for which
   `plan-state.sh check` prints `STALE`), whatever the selection says, plus each jira-mine ticket
   whose plan file `./plans/<KEY>.plan.md` does NOT exist.
@@ -176,26 +185,37 @@ To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field,
      text). A STALE plan is moved to `.prev` and its `changes.md` kept. Exit 2 → skip it quietly: a
      plan that is not STALE already exists. Any other failure → report it, next key.
      - `rest`: `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh fetch <KEY>`.
-     - `mcp`: run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh mcp-request <KEY> --for fetch`,
-       call the tool it prints once with those args. The receipt names the ticket's parent when there
-       is one, with the exact args for it: make that one call too (only then). Then run
-       `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh fetch <KEY> --source mcp`.
-       Exit 3 (the comment thread was cut off by the connector) → run the plain REST fetch
-       `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh fetch <KEY>` instead. Exit 1 (for example
-       a capture that was rejected or has expired) → report it, next key; a retry needs a new request.
-  2. Run `/asdlc:implement-prd ./plans/<KEY>/context.md --plan-only` (Skill tool; writes + stamps
-     ./plans/<KEY>.plan.md, then stops; on a re-plan it reuses the `.prev` answers and handles `changes.md`)
+     - `mcp`: do the "Fetch" of "Jira over MCP".
+  2. Read `${CLAUDE_PLUGIN_ROOT}/docs/plan-only-flow.md` and follow it, with the PRD `./plans/<KEY>/context.md`
+     (it writes + stamps ./plans/<KEY>.plan.md, then stops; on a re-plan it reuses the `.prev` answers and
+     handles `changes.md`). Where the flow says STOP, it ends for this key: go on to step 3.
   3. Report: `<KEY> planned — answer open questions, then /asdlc:plan approve <KEY>`
      (a re-plan: `<KEY> re-planned after ticket change — ...`).
 - A plan that is not STALE is left alone, whatever its status — planning never clobbers an approval.
 - Never read `./plans/<KEY>/raw/`, `context.md`, `changes.md`, `review-brief.md` or `review.diff` yourself: ticket text is for the
   planner, critic and brief writer. Report from what the scripts print (counts, verdict lines) only.
 
-## Jira writes over MCP
-Only when `<TRANSPORT>` is `mcp`; under `rest` the plain scripts (`jira-transition.sh <KEY> <target>`,
-`jira-notify.sh <KEY> [note]`) do the writes, as before. Same rule as above: use the printed args
-unchanged, never read raw output.
-- Transition (may run automatically, like the REST form):
+## Jira over MCP
+Only when `<TRANSPORT>` is `mcp` (the "Check read" also when a plan's source is `mcp`); under `rest` the plain scripts
+(`jira-transition.sh <KEY> <target>`, `jira-notify.sh <KEY> [note]`, `jira-mine.sh <selection>`,
+`jira-context.sh fetch <KEY>`) do the work, as before. Same rule as above: use the printed args
+unchanged, never read raw output. The steps above name the part they use.
+- Check read (for the *Stale check*): run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh mcp-request <KEY> --for check`. It prints one
+  JSON line `{"tool":…,"args":{…}}`; call that tool once with those args. (If MCP is not available,
+  skip both: the check then gives UNCHECKED. A plan made over MCP is never checked over REST.)
+- Search (Phase B, the ticket list): `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh --mcp-args <selection>` prints one
+  `{"tool":…,"args":{…}}` line; call that tool once with those args, then run
+  `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-mine.sh --from-mcp <selection>` (the same selection). It
+  prints the same JSON list as the `rest` form, and warns on stderr about a second page or an empty
+  result (relay the warning).
+- Fetch (Phase B, one ticket): run `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh mcp-request <KEY> --for fetch`,
+  call the tool it prints once with those args. The receipt names the ticket's parent when there
+  is one, with the exact args for it: make that one call too (only then). Then run
+  `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh fetch <KEY> --source mcp`.
+  Exit 3 (the comment thread was cut off by the connector) → run the plain REST fetch
+  `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-context.sh fetch <KEY>` instead. Exit 1 (for example
+  a capture that was rejected or has expired) → report it, next key; a retry needs a new request.
+- Transition (step 2 of *Run a plan*; may run automatically, like the REST form):
   1. `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-transition.sh --mcp-args <KEY>` prints two
      `{"tool":…,"args":{…}}` lines. Call each tool once with its args (the first reads the status, the
      second the available transitions; the hook shows you receipts only).

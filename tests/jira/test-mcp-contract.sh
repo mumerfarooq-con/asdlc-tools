@@ -101,4 +101,24 @@ assert_contains "$(receipt_text)" "captured the Bitbucket response (id 42)" "bb 
 run "$S/bb-open-pr.sh" --from-mcp; assert_eq "$CODE/$OUT" "0/42 $URL" "the id and url the hook stored"
 unset ASDLC_BB_MCP_SERVER ASDLC_BB_MCP_PROFILE ASDLC_ALLOW_TEST_BB_PROFILE
 
+# ---- every request the scripts write carries its kind (the capture protocol, jira/README.md) ----
+t "contract: each opener writes a request with its kind, the shared fields and the one TTL"
+kind_of() { jq -r '[.v, .kind, (.nonce | test("\\A[0-9a-f]{24}\\z")), (.expires_epoch - .created_epoch)] | join(" ")' "$1"; }
+ctx_sandbox
+for k in fetch check transition comment; do
+  run "$JC" mcp-request PROJ-1 --for "$k"; assert_eq "$CODE" "0" "mcp-request --for $k"
+  assert_eq "$(kind_of plans/PROJ-1/.mcp/request.json)" "1 $k true 600" "a $k request"
+  assert_eq "$(jq -r '.purpose' plans/PROJ-1/.mcp/request.json)" "$k" "purpose stays the same as kind"
+done
+sandbox; run "$S/jira-mine.sh" --mcp-args --anyone --any-status; assert_eq "$CODE" "0" "mine --mcp-args"
+assert_eq "$(kind_of plans/.mcp/search/request.json)" "1 search true 600" "a search request"
+sandbox 'BB_TRANSPORT=mcp'
+export ASDLC_BB_MCP_SERVER=bbfixture ASDLC_BB_MCP_PROFILE=test ASDLC_ALLOW_TEST_BB_PROFILE=1
+run "$S/bb-open-pr.sh" --mcp-args feature/x "Add x"; assert_eq "$CODE" "0" "bb-open-pr --mcp-args"
+assert_eq "$(kind_of plans/.mcp/bb/request.json)" "1 bb true 600" "a bb request (open_pr)"
+run "$S/bb-pr-comment.sh" --mcp-args 7 "[asdlc] hi"; assert_eq "$CODE" "0" "bb-pr-comment --mcp-args"
+assert_eq "$(kind_of plans/.mcp/bb/request.json)" "1 bb true 600" "a bb request (pr_comment)"
+assert_eq "$(jq -r .op plans/.mcp/bb/request.json)" "pr_comment" "its op"
+unset ASDLC_BB_MCP_SERVER ASDLC_BB_MCP_PROFILE ASDLC_ALLOW_TEST_BB_PROFILE
+
 finish

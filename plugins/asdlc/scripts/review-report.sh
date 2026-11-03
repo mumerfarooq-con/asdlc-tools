@@ -26,6 +26,7 @@ REASONS=" migration authz irreversible billing infra concurrency api-contract en
 
 usage() { echo "usage: review-report.sh must-read <report> [--diff <base> <head>]" >&2; exit 2; }
 command -v jq >/dev/null || { echo "review-report.sh: jq is required" >&2; exit 2; }
+. "$(dirname "$0")/../jira/scripts/review-lib.sh"   # asdlc_valid_hunk: the one hunk grammar
 
 # Fail closed: print the high-tier object with one warning and exit 3.
 fail() {
@@ -75,7 +76,7 @@ fi
 # Table rows: lines starting with '|'; the header and the |---| separator are skipped.
 rows_tsv=""; nrows=0; has_non_other=0; reasons=""
 # path:start-end, or path:line (a one-line hunk, read as line-line: models sometimes write it).
-hunk_re='^([^[:space:]]+):([0-9]{1,9})(-([0-9]{1,9}))?$'
+line_re='^(.+):([0-9]+)$'
 while IFS= read -r line; do
   case "$line" in '|'*) ;; *) continue ;; esac
   IFS='|' read -r _ n hunk reason _ <<EOT
@@ -88,14 +89,15 @@ EOT
   [ "$nrows" -le "$MAX_ROWS" ] || fail "more than $MAX_ROWS rows"
   [[ $n =~ ^[0-9]{1,3}$ ]] || fail "row $nrows: the # column is not a number"
   hunk="$(unquote "$hunk")"; reason="$(unquote "$reason")"
-  [[ $hunk =~ $hunk_re ]] || fail "row $nrows: malformed hunk (want path:start-end)"
-  file="${BASH_REMATCH[1]}"; start=$((10#${BASH_REMATCH[2]})); end=$((10#${BASH_REMATCH[4]:-${BASH_REMATCH[2]}}))
-  case "$file" in -*|/*) fail "row $nrows: malformed hunk path" ;; esac
-  case "/$file/" in */../*|*/./*|*//*) fail "row $nrows: malformed hunk path" ;; esac
-  [[ $file =~ [[:cntrl:]] ]] && fail "row $nrows: malformed hunk path"
-  # A comma would split the path in a record's hunk list (review-record.sh add takes a comma list).
-  case "$file" in *,*) fail "row $nrows: malformed hunk path" ;; esac
-  [ "$start" -ge 1 ] && [ "$end" -ge "$start" ] || fail "row $nrows: malformed hunk range"
+  if [[ $hunk =~ $line_re ]]; then hunk="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}-${BASH_REMATCH[2]}"; fi
+  if ! asdlc_valid_hunk "$hunk"; then
+    case "$HUNK_ERR" in
+      form) fail "row $nrows: malformed hunk (want path:start-end)" ;;
+      range) fail "row $nrows: malformed hunk range" ;;
+      *) fail "row $nrows: malformed hunk path" ;;
+    esac
+  fi
+  file="$HUNK_PATH"; start="$HUNK_START"; end="$HUNK_END"
   case "$REASONS" in *" $reason "*) ;; *) fail "row $nrows: unknown reason" ;; esac
   if [ "$reason" != other ]; then
     has_non_other=1
