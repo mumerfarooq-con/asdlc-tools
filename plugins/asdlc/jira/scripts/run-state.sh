@@ -255,12 +255,8 @@ case "$cmd" in
     [ -n "$url" ] || die 19 "slice $SL_CUR has no PR recorded in the plan, so its merge cannot be confirmed"
     [ -n "$BB_WORKSPACE" ] && [ -n "$BB_REPO" ] || die 2 "BB_WORKSPACE and BB_REPO must be set in ${ASDLC_CONF_FILE:-.asdlc/jira.conf}"
     bb_err="$(asdlc_check_bb_target 2>&1)" || die 2 "$bb_err"
-    pref="https://bitbucket.org/$BB_WORKSPACE/$BB_REPO/pull-requests/"
-    pid="${url#"$pref"}"; pid="${pid%/}"
-    if [ "$pid" = "$url" ] || ! [[ $pid =~ ^[0-9]{1,9}$ ]]; then
+    pid="$(asdlc_pr_id_from_url "$url")" ||
       die 19 "slice $SL_CUR's PR is not a pull request of $BB_WORKSPACE/$BB_REPO on bitbucket.org, so its merge cannot be confirmed"
-    fi
-    pid=$((10#$pid))
     if [ -z "$ASDLC_FIXTURES" ]; then
       { [ -n "${BITBUCKET_TOKEN:-}" ] && { [ "$BB_AUTH" != basic ] || [ -n "${BITBUCKET_EMAIL:-}" ]; }; } \
         || die 19 "no Bitbucket token (BITBUCKET_TOKEN), so the merge of PR $pid cannot be confirmed; the plan is untouched"

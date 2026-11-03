@@ -395,7 +395,8 @@ assert_not_contains "$jfm" "run-state.sh:*" "but never run-state blanket"
 assert_contains "$jfm" "plan-state.sh slice:*" "jira-run reads the slice"
 assert_contains "$ifm" "plan-state.sh slice:*" "implement-prd reads the slice"
 assert_contains "$JR" "feature/<KEY>-<slug>-s<k>" "per-slice branch"
-assert_contains "$JR" "--id <KEY>-s<k>" "per-slice review id"
+assert_contains "$JR" "--id <ID>" "per-slice review id"
+assert_contains "$JR" "plan-state.sh report-id <plan>" "the report id comes from plan-state.sh report-id"
 assert_contains "$JR" "plans/pr-review-<ID>.md" "per-slice report path"
 assert_contains "$JR" "run-state.sh next-slice <plan>" "Phase A calls next-slice"
 assert_contains "$JR" "slice <k> PR not merged yet" "the exit 19 report"
@@ -410,5 +411,36 @@ assert_contains "$(cat "$P/agents/plan-critic.md")" "should-fix" "critic severit
 assert_contains "$(cat "$P/agents/plan-critic.md")" "both a schema or data migration and a behaviour change" "critic migration-with-behaviour rule"
 assert_not_contains "$JR" "plan-approve" "jira-run never approves"
 assert_not_contains "$IP" "plan-approve" "implement-prd never approves"
+
+# ---- report-id and the shared PR id parser (M4a Task 2) ------------------------------------------
+t "report-id: <KEY> for no slices and slice 1, <KEY>-s<k> from slice 2, 16 with no header"
+sandbox; mkdir plans
+mkplan PROJ-1 3 ""; run "$PS" report-id PROJ-1; assert_eq "$CODE" "16" "no header"
+"$PS" stamp plans/PROJ-1.plan.md >/dev/null
+run "$PS" report-id PROJ-1; assert_eq "$OUT/$CODE" "PROJ-1/0" "no slices section"
+stamped PROJ-2 3 "$ROWS3"
+run "$PS" report-id PROJ-2; assert_eq "$OUT/$CODE" "PROJ-2/0" "slice 1"
+cp plans/PROJ-2.plan.md "$SB/before"
+sed '1,/^-->/s/^slice: 1$/slice: 2/' plans/PROJ-2.plan.md > "$SB/s2" && cp "$SB/s2" plans/PROJ-2.plan.md
+cp plans/PROJ-2.plan.md "$SB/before2"
+run "$PS" report-id plans/PROJ-2.plan.md; assert_eq "$OUT/$CODE" "PROJ-2-s2/0" "slice 2"
+assert_same plans/PROJ-2.plan.md "$SB/before2" "report-id is read-only: the plan"
+sed -i.bak '1,/^-->/s/^slice: 2$/slice: 3/' plans/PROJ-2.plan.md; rm -f plans/PROJ-2.plan.md.bak
+run "$PS" report-id PROJ-2; assert_eq "$OUT/$CODE" "PROJ-2-s3/0" "slice 3"
+sed -i.bak '1,/^-->/s/^slice: 3$/slice: x/' plans/PROJ-2.plan.md; rm -f plans/PROJ-2.plan.md.bak
+run "$PS" report-id PROJ-2; assert_eq "$CODE" "2" "a bad slice header is refused"
+run "$PS" report-id PROJ-9; assert_eq "$CODE" "2" "no such plan"
+
+t "asdlc_pr_id_from_url: a good URL, another repo, a non-numeric id, a trailing slash"
+sandbox
+pid() { ( set +e; . "$S/lib.sh"; BB_WORKSPACE=acme; BB_REPO=widgets; asdlc_pr_id_from_url "$1"; echo "/$?" ); }
+assert_eq "$(pid https://bitbucket.org/acme/widgets/pull-requests/7)" "7/0" "good URL"
+assert_eq "$(pid https://bitbucket.org/acme/widgets/pull-requests/7/)" "7/0" "trailing slash"
+assert_eq "$(pid https://bitbucket.org/acme/widgets/pull-requests/007)" "7/0" "leading zeros read as decimal"
+assert_eq "$(pid https://bitbucket.org/acme/other/pull-requests/7)" "/1" "another repo"
+assert_eq "$(pid https://bitbucket.org/acme/widgets/pull-requests/abc)" "/1" "non-numeric id"
+assert_eq "$(pid https://bitbucket.org/acme/widgets/pull-requests/1234567890)" "/1" "over the 9-digit cap"
+assert_eq "$(pid https://bitbucket.org/acme/widgets/pull-requests/)" "/1" "no id"
+assert_eq "$(pid https://github.com/acme/widgets/pull/7)" "/1" "not bitbucket"
 
 finish

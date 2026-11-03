@@ -36,19 +36,11 @@ if [ "$MCP" = from ]; then asdlc_bb_mcp_take pr_comment >/dev/null || exit 1; ec
 # --file: a regular file under plans/, reached without a symlink or a ../ step.
 file_refuse() { echo "--file: $1" >&2; exit 2; }
 read_file_text() {  # <path> -> TEXT
-  local f="$1" top acc="" part size
+  local f="$1" top size
   top="$(pwd -P)"
   case "$f" in "$top"/*) f="${f#"$top"/}" ;; /*) file_refuse "'$f' is outside plans/" ;; esac
   case "$f" in plans/*) ;; *) file_refuse "'$f' is outside plans/" ;; esac
-  local IFS=/
-  set -f  # split on / only: no glob expansion of the parts
-  for part in $f; do
-    case "$part" in ''|.|..) file_refuse "'$f' must be a plain path under plans/ (no '..', '.' or '//')" ;; esac
-    acc="${acc:+$acc/}$part"
-    [ ! -L "$acc" ] || file_refuse "'$acc' is a symlink"
-  done
-  set +f
-  IFS=$' \t\n'
+  asdlc_plain_walk "$f" file_refuse   # no '..', '.', '//' or symlink part (review-lib.sh)
   [ -f "$f" ] || file_refuse "'$f' is not a regular file"
   # Read once, capped: a swap after a separate size check can't get past the limit.
   TEXT="$(head -c 32769 < "$f"; printf x)"; TEXT="${TEXT%x}"

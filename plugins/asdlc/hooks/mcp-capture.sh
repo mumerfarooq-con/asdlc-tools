@@ -13,6 +13,8 @@
 #                           id and URL of the Bitbucket answer. The tool name comes from the request
 #                           (which got it from the profile), never from a list in this script.
 #
+# The request schema, the envelope and the receipts: jira/README.md, "Capture protocol".
+#
 # With no request open it is a no-op: one glob test, no output, no writes, exit 0. It makes no
 # network calls, parses no config (the request file carries what it needs), writes only inside
 # plans/<KEY>/.mcp/, never prints ticket text, and always exits 0 (the guard alone may exit 2).
@@ -71,6 +73,25 @@ NORMJQ='def norm: if type == "string" then fromjson
       elif type == "array" then (map(select(type == "object" and .type == "text") | .text) | join("") | fromjson)
       elif type == "object" and (.content | type) == "array" and (has("issues") | not) then (.content | norm)
       else . end;'
+# One capture, for the search block and the bb block (the ticket block below has its own checks but
+# writes the same envelope). Normalizes the response into a private temp directory under <dir>, checks it,
+# strips it and stores {nonce, tool_name, session_id, captured_epoch, role, response} as <dir>/cap-*.json.
+# Sets CT (the temp directory, removed on exit). A failure calls <reject-fn> "<reason>", which exits.
+capture_store() {  # <dir> <role> <nonce> <reject-fn> <strip-jq> <check-jq> <check-reason> [jq args for strip-jq...]
+  local dir="$1" role="$2" nonce="$3" rj="$4" strip="$5" chk="$6" why="$7"
+  shift 7
+  CT="$(mktemp -d "$dir/.cap.XXXXXX")" || "$rj" "could not write inside the request directory"
+  trap 'rm -rf "$CT"; finish' EXIT
+  printf '%s' "$IN" | jq -c "$NORMJQ"'.tool_response | norm' > "$CT/resp.json" 2>/dev/null || "$rj" "the response is not valid JSON"
+  jq -e '(type == "object") and ((.error // false) | not)' "$CT/resp.json" >/dev/null 2>&1 || "$rj" "the tool reported an error"
+  jq -c "$@" "$strip" "$CT/resp.json" > "$CT/stripped.json" 2>/dev/null || "$rj" "the response could not be read"
+  if [ -n "$chk" ]; then jq -e "$chk" "$CT/stripped.json" >/dev/null 2>&1 || "$rj" "$why"; fi
+  jq -n --arg nonce "$nonce" --arg tn "$TN" --arg sid "$SID" --argjson at "$NOW" --arg role "$role" --slurpfile r "$CT/stripped.json" \
+        '{nonce: $nonce, tool_name: $tn, session_id: $sid, captured_epoch: $at, role: $role, response: $r[0]}' > "$CT/cap.json" 2>/dev/null \
+    || "$rj" "the capture could not be written"
+  mv "$CT/cap.json" "$dir/cap-$NOW-$RANDOM$RANDOM.json" || "$rj" "the capture could not be written"
+}
+
 # ---- a Bitbucket call (bb-open-pr.sh / bb-pr-comment.sh --mcp-args): plans/.mcp/bb/request.json ----
 # The request names the one tool, its exact arguments and where the id and URL sit in the answer
 # (all from the profile). Only the id and URL are stored; the model gets a receipt.
@@ -99,23 +120,14 @@ if [ "$MODE" = bb ]; then
   if [ "${#IN}" -gt "$MAXB" ]; then bb_reject "the response is larger than the capture limit"; fi
   printf '%s' "$IN" | jq -e --slurpfile r "$BB_REQ" '.tool_input == $r[0].args' >/dev/null 2>&1 \
     || bb_reject "the call's arguments differ from what the request asked for"
-  BTMP="$(mktemp -d "$BD/.cap.XXXXXX")" || bb_reject "could not write inside the request directory"
-  trap 'rm -rf "$BTMP"; finish' EXIT
-  printf '%s' "$IN" | jq -c "$NORMJQ"'.tool_response | norm' > "$BTMP/resp.json" 2>/dev/null || bb_reject "the response is not valid JSON"
-  jq -e '(type == "object") and ((.error // false) | not)' "$BTMP/resp.json" >/dev/null 2>&1 || bb_reject "the tool reported an error"
-  jq -c --arg ip "$bidp" --arg up "$burlp" '
+  capture_store "$BD" bb "$bnonce" bb_reject '
       (getpath($ip | split(".")) | if type == "string" or type == "number" then tostring else null end) as $i
       | (getpath($up | split(".")) | if type == "string" then . else null end) as $u
       | {id: (if $i != null and ($i | test("\\A[0-9]{1,18}\\z")) then $i else null end),
-         url: (if $u != null and ($u | test("\\Ahttps://[^[:space:]]+\\z")) then $u else "" end)}' "$BTMP/resp.json" > "$BTMP/stripped.json" 2>/dev/null \
-    || bb_reject "the response could not be read"
-  jq -e '.id != null' "$BTMP/stripped.json" >/dev/null 2>&1 || bb_reject "the response holds no PR or comment id at the profile's path"
-  jq -n --arg nonce "$bnonce" --arg tn "$TN" --arg sid "$SID" --argjson at "$NOW" --slurpfile r "$BTMP/stripped.json" \
-        '{nonce: $nonce, tool_name: $tn, session_id: $sid, captured_epoch: $at, role: "bb", response: $r[0]}' > "$BTMP/cap.json" 2>/dev/null \
-    || bb_reject "the capture could not be written"
-  mv "$BTMP/cap.json" "$BD/cap-$NOW-$RANDOM$RANDOM.json" || bb_reject "the capture could not be written"
+         url: (if $u != null and ($u | test("\\Ahttps://[^[:space:]]+\\z")) then $u else "" end)}' \
+    '.id != null' "the response holds no PR or comment id at the profile's path" --arg ip "$bidp" --arg up "$burlp"
   EMITTED=1
-  jq -nc --arg r "asdlc captured the Bitbucket response (id $(jq -r .id "$BTMP/stripped.json")). Next: run the same script with --from-mcp." \
+  jq -nc --arg r "asdlc captured the Bitbucket response (id $(jq -r .id "$CT/stripped.json")). Next: run the same script with --from-mcp." \
     '{hookSpecificOutput:{hookEventName:"PostToolUse",updatedMCPToolOutput:$r}}'
   exit 0
 fi
@@ -147,17 +159,8 @@ if [ "$TOOL" = searchJiraIssuesUsingJql ]; then
       ($r[0]) as $w | (.tool_input.cloudId == $w.cloud_id) and (.tool_input.jql == $w.jql) and (.tool_input.maxResults == $w.maxResults)
       and (.tool_input.fields | type) == "array" and ((.tool_input.fields | sort) == ($w.fields | sort))' >/dev/null 2>&1 \
     || reject "the call's jql, fields or maxResults differ from what the request asked for, or its cloudId does (use the printed args)"
-  STMP="$(mktemp -d "$SD/.cap.XXXXXX")" || reject "could not write inside the request directory"
-  trap 'rm -rf "$STMP"; finish' EXIT
-  printf '%s' "$IN" | jq -c "$NORMJQ"'.tool_response | norm' > "$STMP/resp.json" 2>/dev/null || reject "the response is not valid JSON"
-  jq -e '(type == "object") and ((.error // false) | not)' "$STMP/resp.json" >/dev/null 2>&1 || reject "the tool reported an error"
-  jq -e '(.issues.nodes | type) == "array"' "$STMP/resp.json" >/dev/null 2>&1 || reject "the response is not a search result"
-  jq -c 'del(.context)' "$STMP/resp.json" > "$STMP/stripped.json" 2>/dev/null || reject "the response could not be stripped"
-  jq -n --arg nonce "$snonce" --arg tn "$TN" --arg sid "$SID" --argjson at "$NOW" --slurpfile r "$STMP/stripped.json" \
-        '{nonce: $nonce, tool_name: $tn, session_id: $sid, captured_epoch: $at, role: "search", response: $r[0]}' \
-        > "$STMP/cap.json" 2>/dev/null || reject "the capture could not be written"
-  mv "$STMP/cap.json" "$SD/cap-$NOW-$RANDOM$RANDOM.json" || reject "the capture could not be written"
-  SSTATS="$(jq -r '"\(.issues.nodes | length) tickets, more pages: \(if .issues.pageInfo.hasNextPage == true then "yes" else "no" end)"' "$STMP/stripped.json" 2>/dev/null)" || SSTATS="counts unavailable"
+  capture_store "$SD" search "$snonce" reject 'del(.context)' '(.issues.nodes | type) == "array"' "the response is not a search result"
+  SSTATS="$(jq -r '"\(.issues.nodes | length) tickets, more pages: \(if .issues.pageInfo.hasNextPage == true then "yes" else "no" end)"' "$CT/stripped.json" 2>/dev/null)" || SSTATS="counts unavailable"
   receipt "asdlc captured the search ($SSTATS). Next: run jira-mine.sh --from-mcp with the same selection."
   exit 0
 fi
@@ -238,7 +241,7 @@ if [ "$(jq -r --arg c "$CALL" '.calls | has($c)' "$REQ" 2>/dev/null)" != true ];
   [ "$TOOL" != getJiraIssue ] || reject "this request does not cover a ticket read"
   ENGAGED=0; exit 0     # a write tool this request did not ask for: not ours
 fi
-PURPOSE="$(rq '.purpose')"
+PURPOSE="$(rq '.kind')"
 [[ $PURPOSE =~ ^(fetch|check|transition|comment)$ ]] || reject "unreadable request"
 if [ "${#IN}" -gt "$MAXB" ]; then reject "the response is larger than the capture limit"; fi
 

@@ -79,51 +79,24 @@ MCP_FIELDS="summary,status,priority,issuetype,labels"
 MCP_MAX=40
 
 if [ "$MCP" = args ]; then
-  # Opens plans/.mcp/search/request.json (10 minutes) and prints the one call the model may make.
+  # Opens plans/.mcp/search/request.json (jira/README.md, "Capture protocol") and prints the one call the model may make.
   # The capture hook stores the response and hands the model a receipt, so no ticket text is read.
-  server="${ASDLC_JIRA_MCP_SERVER:-claude_ai_Atlassian}"
-  [[ $server =~ ^[A-Za-z0-9_-]+$ ]] || { echo "ASDLC_JIRA_MCP_SERVER must be letters, digits, _ and - only" >&2; exit 2; }
-  host="${JIRA_BASE_URL#https://}"; host="${host%%[:/]*}"
-  [[ $host =~ ^[A-Za-z0-9.-]+$ ]] || asdlc_die "JIRA_BASE_URL has no usable host for the MCP cloudId"
-  dir=plans/.mcp/search
-  if [ -L plans ] || [ -L plans/.mcp ] || [ -L "$dir" ]; then asdlc_die "refusing: plans/, plans/.mcp or $dir is a symbolic link"; fi
-  mkdir -p "$dir"; rm -f "$dir"/request.json "$dir"/cap-*.json
-  now=$(date +%s); nonce="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
-  rtmp="$(mktemp "$dir/.request.XXXXXX")"
-  jq -n --arg server "$server" --arg nonce "$nonce" --arg cloud "$host" --arg jql "$JQL" --arg f "$MCP_FIELDS" \
-        --argjson max "$MCP_MAX" --argjson now "$now" \
-        '{v: 1, kind: "search", server: $server, nonce: $nonce, cloud_id: $cloud, created_epoch: $now,
-          expires_epoch: ($now + 600), jql: $jql, fields: ($f | split(",")), maxResults: $max}' > "$rtmp" \
-    || { rm -f "$rtmp"; asdlc_die "could not write the search request"; }
-  mv "$rtmp" "$dir/request.json"
-  jq -nc --arg t "mcp__${server}__searchJiraIssuesUsingJql" --arg cloud "$host" --slurpfile r "$dir/request.json" \
+  server="$(asdlc_mcp_server)" || exit 2
+  host="$(asdlc_mcp_cloud)" || exit 1
+  extra="$(jq -nc --arg cloud "$host" --arg jql "$JQL" --arg f "$MCP_FIELDS" --argjson max "$MCP_MAX" \
+        '{cloud_id: $cloud, jql: $jql, fields: ($f | split(",")), maxResults: $max}')"
+  mcp_request_open plans/.mcp/search search "$server" "$extra" || asdlc_die "$MCP_WHY"
+  jq -nc --arg t "mcp__${server}__searchJiraIssuesUsingJql" --arg cloud "$host" --slurpfile r plans/.mcp/search/request.json \
     '{tool: $t, args: {cloudId: $cloud, jql: $r[0].jql, fields: $r[0].fields, maxResults: $r[0].maxResults}}'
   exit 0
 fi
 
 if [ "$MCP" = from ]; then
   dir=plans/.mcp/search; req="$dir/request.json"
-  if [ -L plans ] || [ -L plans/.mcp ] || [ -L "$dir" ] || [ -L "$req" ]; then asdlc_die "refusing: plans/, plans/.mcp or $dir is a symbolic link"; fi
-  [ -f "$req" ] || { echo "no open MCP search request; run jira-mine.sh --mcp-args <selection>, make the call it prints, then retry" >&2; exit 1; }
-  line="$(jq -r '[.v, .kind, .server, .nonce, .created_epoch, .expires_epoch] | map(tostring) | join(" ")' "$req" 2>/dev/null)" || line=""
-  read -r v kind srv nonce created expires <<<"$line" || true
-  if ! { [ "${v:-}" = 1 ] && [ "${kind:-}" = search ] && [[ ${srv:-} =~ ^[A-Za-z0-9_-]+$ ]] && [[ ${nonce:-} =~ ^[0-9a-f]{8,64}$ ]] &&
-         [[ ${created:-} =~ ^[0-9]+$ ]] && [[ ${expires:-} =~ ^[0-9]+$ ]]; }; then
-    echo "the MCP search request is unreadable; open a new one with --mcp-args" >&2; exit 1
-  fi
-  [ "$expires" -gt "$(date +%s)" ] || { echo "the MCP search request has expired; open a new one with --mcp-args" >&2; exit 1; }
+  mcp_request_load "$req" "MCP search request" search "with jira-mine.sh --mcp-args <selection>" || { echo "$MCP_WHY" >&2; exit 1; }
   [ "$(jq -r --arg j "$JQL" '.jql == $j' "$req" 2>/dev/null)" = true ] ||
     { echo "the open MCP search request is for a different selection; give --from-mcp the selection --mcp-args got" >&2; exit 1; }
-  best=""; bestat=-1
-  for f in "$dir"/cap-*.json; do
-    [ -f "$f" ] && [ ! -L "$f" ] || continue
-    at="$(jq -r --arg n "$nonce" --argjson c "$created" --arg tool "mcp__${srv}__searchJiraIssuesUsingJql" '
-          select(type == "object" and .nonce == $n and .tool_name == $tool and .role == "search"
-                 and (.captured_epoch | type) == "number" and .captured_epoch >= $c
-                 and (.response.issues.nodes | type) == "array") | .captured_epoch | floor' "$f" 2>/dev/null)" || continue
-    [[ $at =~ ^[0-9]+$ ]] || continue
-    if [ "$at" -gt "$bestat" ] || { [ "$at" -eq "$bestat" ] && [[ $f > $best ]]; }; then best="$f"; bestat="$at"; fi
-  done
+  best="$(mcp_pick_capture "$dir" "$MCP_NONCE" "$MCP_CREATED" "mcp__${MCP_SERVER}__searchJiraIssuesUsingJql" search "" "$MCP_FILTER_SEARCH")"
   [ -n "$best" ] || { echo "no valid capture of the search under the open MCP request (make the call --mcp-args printed, with exactly those args)" >&2; exit 1; }
   resp="$(mktemp)"; trap 'rm -f "$resp"' EXIT
   jq -c '.response | {issues: .issues.nodes, more: (.issues.pageInfo.hasNextPage == true)}' "$best" > "$resp" 2>/dev/null ||

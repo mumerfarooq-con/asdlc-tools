@@ -4,6 +4,33 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.7.0] - 2026-11-03
+
+Groundwork for the ticket check (M4b). Plans, approvals and fingerprints are unchanged.
+
+### Added
+
+- **`plan-state.sh log <plan> <task> <ROLE> <VERDICT> [note]`** writes a progress line. It accepts only the six contract verdicts (`EXECUTOR DONE`, `EXECUTOR BLOCKED`, `REVIEW APPROVED`, `REVIEW CHANGES_REQUESTED`, `TEST PASS`, `TEST FAIL`), changes only the Progress part (the approval hash stays valid), and caps the note at 300 bytes without splitting a character.
+- **`plan-state.sh report-id <plan>`** prints the review report id (`<KEY>`, or `<KEY>-s<k>` from slice 2). `jira-run`, the review queue and `/asdlc:review-tour` all use it.
+- **`plan-state.sh find-branch <branch>` and `find-pr <id>`** print the one plan that claims a branch or a Bitbucket PR, read-only. Exit 1 means none, exit 2 means more than one, or a bad argument. `/asdlc:review-tour` uses them instead of searching the plans.
+- **`jira-context.sh meta <KEY>`** prints the saved ticket's issue type and labels (a safe character set, at most 200 bytes) for `review-mode.sh`, so the council/solo choice uses them under `--execute-only` too.
+- **`docs/plan-only-flow.md`**: the plan-only flow, in one file that `/asdlc:implement-prd --plan-only` and `/asdlc:jira-run` both follow.
+- **"Capture protocol"** section in the Jira guide: the MCP request schema, the capture envelope, the receipts, the TTL and who opens and consumes each request.
+
+### Changed
+
+- **Progress lines are written by the orchestrator through `plan-state.sh log`.** `prd-executor`, `prd-reviewer` and `prd-tester` return their verdict line and no longer edit the plan. `prd-reviewer` writes only its own retrospective review file.
+- **MCP requests share one library** (`jira/scripts/mcp-lib.sh`): one 10-minute expiry, a `kind` field in every request, and one hook path for the search and Bitbucket captures. A hygiene test checks that every script a receipt names exists.
+- **Shared review helpers** live in `jira/scripts/review-lib.sh`: the key and directory checks, the `plans/` symlink walk, the PR id from a URL, and one hunk grammar for the report and the record. A record hunk with a `.` path part is now refused, as the report already did.
+- **`/asdlc:jira-run` Phase A has named sections** (Review queue, Which plans run, Stale check, Run a plan, After APPROVE), and its MCP variants are in one "Jira over MCP" section.
+- **Searching on newer Claude Code builds.** The main session there has no Glob or Grep tools. Commands no longer rely on them, and the `pr-reviewer*` agents search with `grep -rn` or `find` through Bash. Agents that declare Glob and Grep still get them, so no agent's tools changed. No plugin file pre-approves `rg` or `find`.
+
+### Upgrading
+
+- Nothing to do for plans and approvals: hashes and fingerprints are unchanged.
+- A custom agent that appends Progress lines itself should return its verdict instead. The orchestrator logs it with `plan-state.sh log`.
+- After `/asdlc:jira-run`'s first confirmation pause, your Claude Code may ask again for scripts the command pre-approves. Approve them, or add them to your own settings (see the Jira guide).
+
 ## [1.6.0] - 2026-11-02
 
 ### Added

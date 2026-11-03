@@ -7,6 +7,8 @@
 #   jira-context.sh build <KEY> --source <s>       # raw/ -> context.md + fingerprint file
 #   jira-context.sh fingerprint <rawdir>           # print sha256:<hex> for a raw/ directory
 #   jira-context.sh check <plan>                   # the stale check: FRESH (0), STALE (17), UNCHECKED (21)
+#   jira-context.sh meta <KEY>                     # read-only, no network: <issue_type><TAB><labels_csv> from the saved raw/ issue
+#                                                  # (REST or MCP); safe characters only, 200 bytes at most; an empty line when nothing is saved
 #   jira-context.sh transport                      # no network: transport=<auto, mcp or rest> mcp_server=<name> rest_ready=yes|no(<why>)
 #   jira-context.sh mcp-request <KEY> --for fetch|check|transition|comment
 #                                                  # open a capture request; prints the MCP call to make
@@ -20,7 +22,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 . "$ASDLC_SHARED_SCRIPTS/fp-sources.sh"            # FP_SOURCES, fp_source_ok (one list, shared with plan-lib.sh)
 . "$(dirname "$0")/context-lib.sh"                 # JQ_COMMON, JQ_FACTS, comments_all, asdlc_fingerprint, snapshot
-case "${1:-}" in fingerprint|check|transport) ASDLC_CONF_OPTIONAL=1 ;; esac  # hashing needs no site config; check reports a missing one itself
+case "${1:-}" in fingerprint|check|transport|meta) ASDLC_CONF_OPTIONAL=1 ;; esac  # hashing needs no site config; check reports a missing one itself
 
 # The stale check must never end without a verdict: any exit that did not come through
 # unchecked/refuse/a verdict (a bad config, a failed command) is UNCHECKED, never a silent pass.
@@ -33,7 +35,7 @@ case "${1:-}" in check) trap check_exit EXIT ;; esac
 asdlc_init "$@"; set -- ${ASDLC_ARGS[@]+"${ASDLC_ARGS[@]}"}
 
 PS="$ASDLC_SHARED_SCRIPTS/plan-state.sh"
-usage() { echo "usage: jira-context.sh fetch <KEY> [--source ${BUILD_SOURCES// /|}] | build <KEY> --source ${BUILD_SOURCES// /|} | fingerprint <rawdir> | check <plan> | transport | mcp-request <KEY> --for fetch|check|transition|comment" >&2; exit 2; }
+usage() { echo "usage: jira-context.sh fetch <KEY> [--source ${BUILD_SOURCES// /|}] | build <KEY> --source ${BUILD_SOURCES// /|} | fingerprint <rawdir> | check <plan> | meta <KEY> | transport | mcp-request <KEY> --for fetch|check|transition|comment" >&2; exit 2; }
 fail() { echo "$*" >&2; exit "${FAIL_CODE:-1}"; }
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 oneline() { tr -d '\000-\037' | cut -c1-200; }  # a reason must stay on one line
@@ -174,64 +176,25 @@ source_read() {  # <source> <KEY> <rawdir> <fetch|check>
 
 # --- the mcp source: consuming a capture -------------------------------------------------------
 # jira-context.sh mcp-request opened plans/<KEY>/.mcp/request.json and the capture hook stored
-# the Atlassian responses next to it (cap-*.json). Here they are used, once.
+# the Atlassian responses next to it (cap-*.json). Here they are used, once (see "Capture protocol"
+# in jira/README.md; the reading itself is asdlc_mcp_take in mcp-lib.sh).
 
 # Take the captures of the open request for <KEY> into <outdir> as mcp-issue.json (the issue
-# node) and, when the issue has a parent and its capture exists, mcp-parent.json. A capture
-# counts only if its nonce is the request's, it was taken by the request's server, and it is
-# not older than the request; the request must be for <purpose>, not expired, and the newest
-# valid capture per role wins. The request and all captures are deleted once an issue capture
-# was taken (use once). Never exits; returns 0 or 1 with READ_WHY set.
+# node) and, when the issue has a parent and its capture exists, mcp-parent.json. The request and
+# all captures are deleted once an issue capture was taken (use once). Never exits; returns 0 or 1
+# with READ_WHY set.
 mcp_consume() {  # <KEY> <purpose> <outdir>
-  local key="$1" purpose="$2" out="$3" dir req line v rkey rpurpose srv nonce created expires f l list ifile pfile pk
-  local tab=$'\t'
-  dir="plans/$key/.mcp"; req="$dir/request.json"
-  if [ -L plans ] || [ -L "plans/$key" ] || [ -L "$dir" ] || [ -L "$req" ]; then
-    READ_WHY="refusing: plans/, plans/$key or its .mcp is a symbolic link"; return 1
+  local key="$1" purpose="$2" out="$3" tmpc
+  tmpc="$(mktemp -d)"
+  if ! asdlc_mcp_take "$key" "$purpose" "$tmpc" issue parent; then
+    rm -rf "$tmpc"
+    READ_WHY="${MCP_WHY/no valid issue capture of/no valid capture of}"; return 1
   fi
-  [ -f "$req" ] || { READ_WHY="no open MCP request for $key; run: jira-context.sh mcp-request $key --for $purpose, make the call it prints, then retry"; return 1; }
-  line="$(jq -r '[.v, .key, .purpose, .server, .nonce, .created_epoch, .expires_epoch] | map(tostring) | join(" ")' "$req" 2>/dev/null)" || line=""
-  read -r v rkey rpurpose srv nonce created expires <<<"$line" || true
-  if ! { [ "${v:-}" = 1 ] && [ "${rkey:-}" = "$key" ] && [[ ${srv:-} =~ ^[A-Za-z0-9_-]+$ ]] && [[ ${nonce:-} =~ ^[0-9a-f]{8,64}$ ]] &&
-         [[ ${created:-} =~ ^[0-9]+$ ]] && [[ ${expires:-} =~ ^[0-9]+$ ]]; }; then
-    READ_WHY="the MCP request for $key is unreadable; open a new one with mcp-request"; return 1
-  fi
-  [ "$rpurpose" = "$purpose" ] || { READ_WHY="the open MCP request for $key is for $rpurpose, not $purpose; open a new one with mcp-request"; return 1; }
-  [ "$expires" -gt "$(date +%s)" ] || { READ_WHY="the MCP request for $key has expired; open a new one with mcp-request"; return 1; }
-
-  list="$(mktemp)"
-  for f in "$dir"/cap-*.json; do
-    [ -f "$f" ] && [ ! -L "$f" ] || continue
-    l="$(jq -r --arg n "$nonce" --argjson c "$created" --arg tool "mcp__${srv}__getJiraIssue" '
-          select(type == "object" and .nonce == $n and .tool_name == $tool
-                 and (.captured_epoch | type) == "number" and .captured_epoch >= $c
-                 and (.role == "issue" or .role == "parent") and (.response | type) == "object"
-                 and ((.response.issues.nodes // []) | length) == 1
-                 and (.response.issues.nodes[0].fields | type) == "object")
-          | [.role, (.captured_epoch | floor | tostring), (.response.issues.nodes[0].key | tostring),
-             (.response.issues.nodes[0].fields.parent.key // "" | tostring)] | @tsv' "$f" 2>/dev/null)" || continue
-    [ -n "$l" ] && printf '%s\t%s\n' "$l" "$f" >> "$list"
-  done
-  # fields: role, captured epoch, key, parent key, file. Newest first; the file name breaks a tie.
-  ifile="$(awk -F'\t' -v k="$key" '$1 == "issue" && $3 == k' "$list" | LC_ALL=C sort -t "$tab" -k2,2nr -k5,5r | head -n1)"
-  if [ -z "$ifile" ]; then
-    rm -f "$list"
-    READ_WHY="no valid capture of $key under the open MCP request (make the call mcp-request printed, with exactly those args; a capture from another or an older request is ignored)"; return 1
-  fi
-  pk="$(printf '%s' "$ifile" | awk -F'\t' '{print $4}')"
-  ifile="$(printf '%s' "$ifile" | awk -F'\t' '{print $5}')"
-  pfile=""
-  if [ -n "$pk" ] && asdlc_is_key "$pk"; then
-    pfile="$(awk -F'\t' -v k="$pk" '$1 == "parent" && $3 == k' "$list" | LC_ALL=C sort -t "$tab" -k2,2nr -k5,5r | head -n1 | awk -F'\t' '{print $5}')"
-  fi
-  rm -f "$list"
-
   mkdir -p "$out"
-  jq -c '.response.issues.nodes[0]' "$ifile" > "$out/mcp-issue.json" 2>/dev/null || { READ_WHY="could not read the capture of $key"; return 1; }
-  if [ -n "$pfile" ]; then
-    jq -c '.response.issues.nodes[0]' "$pfile" > "$out/mcp-parent.json" 2>/dev/null || { rm -f "$out/mcp-parent.json"; READ_WHY="could not read the capture of the parent of $key"; return 1; }
-  fi
-  rm -f "$req" "$dir"/cap-*.json; rmdir "$dir" 2>/dev/null || true
+  mv "$tmpc/issue.json" "$out/mcp-issue.json"
+  if [ -f "$tmpc/parent.json" ]; then mv "$tmpc/parent.json" "$out/mcp-parent.json"; fi
+  rm -rf "$tmpc"
+  asdlc_mcp_close "$key"
 }
 
 # The mcp source of source_read: the captured issue (and parent) into <rawdir>. A comment list
@@ -622,63 +585,60 @@ cmd_check() {
   exit 17
 }
 
+# --- meta ------------------------------------------------------------------------------------
+# What jira-run passes to review-mode.sh: the saved issue's type and labels, nothing else of the ticket.
+# Reads plans/<KEY>/raw/ (issue.json for REST, the MCP view of mcp-issue.json), whichever source
+# fetch.json names. Prints "<issue_type><TAB><labels_csv>": only [A-Za-z0-9 ._:+/-] survives in each value
+# (no quote, $, backtick or control character can reach a command line), commas are dropped from a label,
+# and the line is at most 200 bytes with its newline. Anything missing, symlinked or unreadable prints an empty line.
+cmd_meta() {
+  [ $# -eq 1 ] && asdlc_is_key "$1" || usage
+  local key="$1" raw="plans/$1/raw" src d="" out="" file
+  meta_none() { [ -z "$d" ] || rm -rf "$d"; echo; exit 0; }
+  asdlc_plain_walk "$raw" meta_none
+  [ ! -L "$raw/fetch.json" ] && [ ! -L "$raw/mcp-issue.json" ] || meta_none
+  src="$(raw_source "$raw" 2>/dev/null)" || meta_none
+  if [ "$src" = mcp ]; then
+    d="$(mktemp -d)"; mcp_view "$raw" "$d/view" >/dev/null 2>&1 || meta_none
+    file="$d/view/issue.json"
+  else file="$raw/issue.json"; fi
+  [ -f "$file" ] && [ ! -L "$file" ] || meta_none
+  out="$(jq -r --arg k "$key" 'select(.key == $k) | .fields as $f
+      | def clean: if type == "string" then gsub("[^A-Za-z0-9 ._:+/-]"; "") else "" end;
+        "\($f.issuetype.name | clean)\t\([($f.labels // [])[] | clean | select(. != "")] | join(","))"' "$file" 2>/dev/null)" || meta_none
+  [ -n "$d" ] && rm -rf "$d"
+  # The jq program removes every tab and newline from the values; keep only the one tab it added.
+  printf '%s\n' "$out" | LC_ALL=C head -n1 | LC_ALL=C cut -b1-199
+}
+
 # --- transport -------------------------------------------------------------------------------
 # What jira-run step 0 needs, with no network: the configured transport, the MCP server name and
 # whether a REST login is ready. Whether the server's tools are in the session is for the model
 # to see; it is not knowable here.
 cmd_transport() {
   [ $# -eq 0 ] || usage
-  local t="${JIRA_TRANSPORT:-auto}" server="${ASDLC_JIRA_MCP_SERVER:-claude_ai_Atlassian}" rr="no(JIRA_EMAIL and JIRA_TOKEN are not both set)"
+  local t="${JIRA_TRANSPORT:-auto}" server rr="no(JIRA_EMAIL and JIRA_TOKEN are not both set)"
   case "$t" in auto) ;; mcp) ;; rest) ;; *) FAIL_CODE=2 fail "JIRA_TRANSPORT must be auto, mcp or rest" ;; esac
-  [[ $server =~ ^[A-Za-z0-9_-]+$ ]] || FAIL_CODE=2 fail "ASDLC_JIRA_MCP_SERVER must be letters, digits, _ and - only"
+  server="$(asdlc_mcp_server)" || exit 2
   if [ -n "${JIRA_EMAIL:-}" ] && [ -n "${JIRA_TOKEN:-}" ]; then rr=yes; fi
   echo "transport=$t mcp_server=$server rest_ready=$rr"
 }
 
-# --- mcp-request (the capture protocol; see hooks/mcp-capture.sh) -------------------------
+# --- mcp-request (capture protocol: jira/README.md; opened by mcp-lib.sh, stored by hooks/mcp-capture.sh) -------------------------
 # Opens plans/<KEY>/.mcp/request.json and prints ONE JSON line, {"tool":..., "args":{...}}: the
 # only MCP call the model may make for this request, passed on unchanged. While the request is
 # open (10 minutes) the plugin's capture hook stores the Atlassian response under .mcp/ and hands
 # the model a receipt with no ticket text. Starting a request drops any earlier request and
 # captures of the same ticket. No network, and no token needed. The server name is per install:
 # ASDLC_JIRA_MCP_SERVER (default claude_ai_Atlassian), set in the user's environment, not the repo.
-MCP_TTL=600
-MCP_PARENT_FIELDS="summary,description,status,issuetype"
-
 cmd_mcp_request() {
-  local key="${1:-}" purpose="${3:-}" server host nonce now dir tmp
+  local key="${1:-}" purpose="${3:-}"
   asdlc_is_key "$key" && [ "${2:-}" = "--for" ] && [ $# -eq 3 ] && case "$purpose" in fetch|check|transition|comment) true ;; *) false ;; esac ||
     FAIL_CODE=2 fail "usage: jira-context.sh mcp-request <KEY> --for fetch|check|transition|comment"
   KEY="$key"
   asdlc_need_marker
   [ -n "$JIRA_BASE_URL" ] || FAIL_CODE=2 fail "JIRA_BASE_URL is not set in $ASDLC_CONF_FILE"
-  host="${JIRA_BASE_URL#https://}"; host="${host%%[:/]*}"
-  [[ $host =~ ^[A-Za-z0-9.-]+$ ]] || FAIL_CODE=2 fail "JIRA_BASE_URL has no usable host for the MCP cloudId"
-  server="${ASDLC_JIRA_MCP_SERVER:-claude_ai_Atlassian}"
-  [[ $server =~ ^[A-Za-z0-9_-]+$ ]] || FAIL_CODE=2 fail "ASDLC_JIRA_MCP_SERVER must be letters, digits, _ and - only"
-  dir="plans/$key/.mcp"
-  if [ -L plans ] || [ -L "plans/$key" ] || [ -L "$dir" ]; then FAIL_CODE=2 fail "refusing: plans/, plans/$key or $dir is a symbolic link"; fi
-  mkdir -p "$dir"
-  rm -f "$dir"/request.json "$dir"/cap-*.json
-  now="$(date +%s)"
-  nonce="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
-  tmp="$(mktemp "$dir/.request.XXXXXX")"
-  jq -n --arg key "$key" --arg purpose "$purpose" --arg server "$server" --arg nonce "$nonce" --arg cloud "$host" \
-        --arg marker "$PIPELINE_COMMENT_MARKER" --argjson now "$now" --argjson ttl "$MCP_TTL" \
-        --arg ifields "$ISSUE_FIELDS" --arg pfields "$MCP_PARENT_FIELDS" '
-      def md($f): {fields: $f, format: "markdown"};
-      {v: 1, key: $key, purpose: $purpose, server: $server, nonce: $nonce, cloud_id: $cloud, marker: $marker,
-       created_epoch: $now, expires_epoch: ($now + $ttl),
-       calls: (if $purpose == "fetch" then {getJiraIssue: md(($ifields | split(",")) + ["comment"]), parent: md($pfields | split(","))}
-               elif $purpose == "check" then {getJiraIssue: md(($ifields | split(",")) + ["comment"])}
-               elif $purpose == "transition" then {getJiraIssue: md(["status"]), getTransitionsForJiraIssue: {}, transitionJiraIssue: {}}
-               else {addCommentToJiraIssue: {}} end),
-       allow_keys: [$key]}' > "$tmp" || { rm -f "$tmp"; FAIL_CODE=1 fail "could not write the request"; }
-  mv "$tmp" "$dir/request.json"
-  jq -nc --arg t "mcp__${server}__$(if [ "$purpose" = comment ]; then echo addCommentToJiraIssue; else echo getJiraIssue; fi)" \
-        --arg cloud "$host" --arg key "$key" --slurpfile r "$dir/request.json" '
-      {tool: $t, args: ({cloudId: $cloud, issueIdOrKey: $key}
-        + (if $r[0].calls.getJiraIssue then {fields: $r[0].calls.getJiraIssue.fields, responseContentFormat: "markdown", updateHistory: false} else {} end))}'
+  asdlc_mcp_ticket_request "$key" "$purpose" "$ISSUE_FIELDS" || FAIL_CODE=$? fail "$MCP_WHY"
 }
 
 # --- dispatch --------------------------------------------------------------------
@@ -690,6 +650,7 @@ case "$sub" in
   fingerprint) [ $# -eq 1 ] || usage; asdlc_need_marker || exit 2; asdlc_fingerprint "$1" || exit 2 ;;
   check)       cmd_check "$@" ;;
   mcp-request) cmd_mcp_request "$@" ;;
+  meta)        cmd_meta "$@" ;;
   transport)   cmd_transport "$@" ;;
   *)           usage ;;
 esac

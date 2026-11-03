@@ -4,6 +4,8 @@ description: Pre-delivery inspector for documentation completeness, doc-vs-behav
 tools: Read, Grep, Glob
 ---
 
+If Glob or Grep is missing, use Read on known paths.
+
 You are the **Documentation** inspector for the Pre-Delivery Quality Check.
 
 **Universal principle:** a future developer should be able to understand both *what* the code does and *why* it does it that way, without reverse-engineering it.

@@ -2,7 +2,7 @@
 description: Walk me through the riskiest hunks of a PR, one question each, and record only what I answered
 argument-hint: <PR id | PR URL | KEY>
 disable-model-invocation: true
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-report.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-record.sh last:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/tour-git.sh:*), Read, Glob, Grep
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh report-id:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-report.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-record.sh last:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/tour-git.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh find-branch:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh find-pr:*), Read
 ---
 
 # /asdlc:review-tour
@@ -12,21 +12,22 @@ Arguments: $ARGUMENTS
 A guided read of the code that must be read by a human. The point is that I form my own view of
 each hunk, so you ask and I answer. Run from the repo root. You never edit code or plan files.
 Run one command per Bash call, only the commands allowed above (no `;`, `&&`, pipes, `ls` or `cat`):
-anything else stops me with a permission prompt. All git goes through `${CLAUDE_PLUGIN_ROOT}/scripts/tour-git.sh` (below); never run bare `git`. Use Glob and Read for the plans and the report.
+anything else stops me with a permission prompt. All git goes through `${CLAUDE_PLUGIN_ROOT}/scripts/tour-git.sh` (below); never run bare `git`. Use Read for the plans and the report; you cannot search by pattern, so find a plan by its known path, or with `find-pr` or `find-branch` below.
 
 ## 1. Resolve the PR
 - A Bitbucket PR id or URL: match the URL's workspace and repo against `BB_WORKSPACE` and `BB_REPO`
-  from `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh` (a mismatch means local-only, below). Find the
-  plan in `./plans/*.plan.md` whose `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get <plan> pr` ends in `/pull-requests/<id>`.
-  If more than one plan claims it, STOP and say so.
-- A ticket KEY: use `./plans/<KEY>.plan.md` and its `pr` and `branch`.
+  from `${CLAUDE_PLUGIN_ROOT}/jira/scripts/jira-conf.sh` (a mismatch means local-only, below). The plan is
+  the line `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh find-pr <id>` prints (the plan whose `pr` ends in
+  `/pull-requests/<id>`). No output: say so and STOP. Exit 2: if more than one plan claims it, STOP and say so.
+- A ticket KEY: use `./plans/<KEY>.plan.md`; read its `pr` and `branch` with
+  `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get <plan> pr` and `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get <plan> branch`.
 - A GitHub URL or a branch name: **local-only**. The record is written locally and never posted. A record
-  needs a plan KEY (find the plan whose `branch` is that branch); use the GitHub PR number, or `0` for a
+  needs a plan KEY (the line `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh find-branch <branch>` prints is that plan; no output means no plan; exit 2 means two plans claim it, so STOP and say so); use the GitHub PR number, or `0` for a
   branch with no PR. No plan: the tour still runs, but records nothing, and you say so at the start.
 - No match, or no `branch`: say so and STOP. Refuse a branch starting with `-`.
 - Run `${CLAUDE_PLUGIN_ROOT}/scripts/tour-git.sh fetch <branch>`, then `${CLAUDE_PLUGIN_ROOT}/scripts/tour-git.sh head <branch>` for the head (sha40).
-- The report id `<ID>`: read `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh get <plan> slice`. Empty or `1`: `<ID>` is `<KEY>`;
-  otherwise `<KEY>-s<k>`. (A branch with no plan: its slug.) The record below still uses `<KEY>`.
+- The report id `<ID>`: the line `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh report-id <plan>` prints.
+  (A branch with no plan: its slug.) The record below still uses `<KEY>`.
 
 ## 2. Build the hunk list (at most 5)
 - Run `${CLAUDE_PLUGIN_ROOT}/scripts/review-report.sh must-read plans/pr-review-<ID>.md --diff origin/<TARGET_BRANCH> origin/<branch>`

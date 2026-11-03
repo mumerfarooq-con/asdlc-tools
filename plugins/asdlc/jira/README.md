@@ -237,6 +237,7 @@ never pre-approved either. `jira-run` pre-approves only the four read and transi
 default connector name; another server name prompts for each call.
 
 ### The capture hook
+(The request, envelope and receipt formats are in [Capture protocol](#capture-protocol).)
 So that ticket text never reaches the orchestrator model, the plugin ships a hook
 (`hooks/mcp-capture.sh`, registered in `hooks/hooks.json`) for MCP calls. A script opens a request
 first (`jira-context.sh mcp-request`, `jira-mine.sh --mcp-args`, `jira-transition.sh --mcp-args`,
@@ -265,6 +266,60 @@ model could call the same tools without the hook. Treat the captures like `plans
 git (`plans/*/` and `plans/.mcp/` are covered by the ignore lines above) and review what a run asks
 to confirm.
 
+### Capture protocol
+The one description of how a script, the hook and `jira-run.md` hand an MCP call to each other. The
+scripts (`jira/scripts/mcp-lib.sh`, `jira-mine.sh`), the hook header (`hooks/mcp-capture.sh`) and
+`commands/jira-run.md` each cite this section in one line and do not repeat it.
+
+**Request.** `plans/<KEY>/.mcp/request.json` (a ticket), `plans/.mcp/search/request.json` (a search)
+or `plans/.mcp/bb/request.json` (a Bitbucket call). One JSON object, written by `mcp_request_open`
+(`jira/scripts/mcp-lib.sh`) through a temp file and `mv`, and never through a symbolic link
+(`plans/`, `plans/<KEY>` or the `.mcp` directory). Opening a request drops the earlier request and
+captures in the same directory.
+
+| Field | Meaning |
+|---|---|
+| `v` | `1`. |
+| `kind` | What the request is for: `fetch`, `check`, `search`, `transition`, `comment` or `bb`. |
+| `server` | The MCP server name (`ASDLC_JIRA_MCP_SERVER`, or `ASDLC_BB_MCP_SERVER` for `bb`). |
+| `nonce` | 24 hex digits, fresh per request. |
+| `created_epoch`, `expires_epoch` | Seconds. The window is `MCP_TTL` (600, set once in `mcp-lib.sh`). |
+| ticket only | `key`, `purpose` (the same as `kind`), `cloud_id`, `marker`, `calls` (the fields and format each allowed read must use), `allow_keys`. |
+| search only | `cloud_id`, `jql`, `fields`, `maxResults`. |
+| `bb` only | `op` (`open_pr` or `pr_comment`), `tool`, `args`, `id_path`, `url_path`. |
+
+**Capture.** While a request is open, the hook checks the call against it (server, key, cloud id,
+exact arguments, not expired, under the size cap), and stores
+`{nonce, tool_name, session_id, captured_epoch, role, response}` as `cap-<epoch>-<random>.json` next
+to the request. `role` is `issue`, `parent`, `getTransitionsForJiraIssue`, `transitionJiraIssue`,
+`addCommentToJiraIssue`, `search` or `bb`. A comment keeps only its id, a Bitbucket answer only the
+PR id and URL, a transition nothing. The model sees a receipt.
+
+**Receipts.** Every receipt carries no ticket text: a count, an id or a reason. Where it names the
+next step it names a real script command (`jira-context.sh fetch|check|mcp-request`,
+`jira-notify.sh --from-mcp`, `jira-mine.sh --from-mcp`, or "the same script with `--from-mcp`");
+`test-hygiene.sh` checks that each one exists. A rejection receipt says why and that nothing was stored.
+
+**Who opens, who takes.**
+
+| Kind | Opened by | Taken by |
+|---|---|---|
+| `fetch`, `check` | `jira-context.sh mcp-request <KEY> --for fetch\|check` | `jira-context.sh fetch --source mcp` and `check` (`mcp_consume`, then the request is closed) |
+| `transition` | `jira-transition.sh --mcp-args` | `jira-transition.sh --from-mcp` (the request stays open for the write) |
+| `comment` | `jira-notify.sh --adf` | `jira-notify.sh --from-mcp` |
+| `search` | `jira-mine.sh --mcp-args` | `jira-mine.sh --from-mcp` |
+| `bb` | `bb-open-pr.sh` or `bb-pr-comment.sh` with `--mcp-args` | the same script with `--from-mcp` |
+
+A consumer takes a capture only if its nonce is the request's, it came from the request's server and
+tool, it is not older than the request, and its content fits (the issue is the right key). The newest
+valid capture wins; the captures are deleted once read. A request that is missing, unreadable, of
+another kind or expired is refused with the reason on stderr.
+
+**Exit codes.** `jira-context.sh mcp-request` exits 2 for a bad setup or a symbolic link and 1 for a
+failed write; the other openers exit 1 (2 for a bad setup). The `--from-mcp` readers and
+`fetch --source mcp` exit 1 when there is no valid capture; `check` says `UNCHECKED` (21) and never
+changes the plan. The hook always exits 0, except `guard`, which exits 2 to block a call.
+
 ## Run it
 ```
 /asdlc:jira-run                         # execute approved, then plan my new tickets
@@ -285,6 +340,15 @@ plan needs a clean working tree (tracked files). Runs are serialized by a lock
 The plugin pre-approves no commit, push or Bitbucket write. The command tells the agent to show
 each one and wait for your go, and the harness prompts for them unless your own permission
 settings allow them.
+
+**Permission prompts after a pause.** A `jira-run` that resumes with `-p --resume` after its first
+confirmation pause may stop applying the command's `allowed-tools`, so the harness can prompt for scripts
+the command pre-approves. Approve them, or add them to your own settings. The prompts do not work
+around it. (Seen in a two-slice smoke test; verify interactively.)
+
+**No Glob or Grep.** The main session has no Glob or Grep tool, so a command never searches by pattern:
+it reads a known path or calls a script (for example `plan-state.sh find-branch <branch>`). The plugin
+pre-approves neither `rg` nor `find`: `rg --pre <program>` runs a program.
 
 ### After a crash
 A crashed run leaves the lock held, and its plan `executing` on its branch with partial work.
@@ -421,13 +485,13 @@ confirm a merge or empty the review queue.
 - `jira-mine.sh` — list tickets to plan (`--key/--sprint/--status/--any-status/--anyone`). It
   prints key, summary, status, priority, type and labels, never the description. Over MCP it lists up to
   40 tickets per run (the connector's cap) against 50 over REST, and it warns when there are more.
-- `jira-context.sh` — `fetch <KEY> [--source <s>] | build <KEY> --source <s> | fingerprint <rawdir> | check <plan> | mcp-request | transport`:
+- `jira-context.sh` — `fetch <KEY> [--source <s>] | build <KEY> --source <s> | fingerprint <rawdir> | check <plan> | mcp-request | transport | meta <KEY>`:
   the ticket context, the fingerprint and the stale check (see above).
 - `ticket-to-prd.sh` — **deprecated**, `jira-run` no longer uses it. One ticket → `./prds/<KEY>.md`
   (description only; no comments, parent or images).
 - `run-state.sh` — run lock and recovery: `lock | unlock <run-id> | status | force-unlock |
   reset-executing | list | start-branch <plan> <summary> | next-slice <plan>`.
-- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing | validate | replan | progress | slice`. It
+- `plan-state.sh` — the approval/hash engine: `stamp | check | set | get | reset-executing | validate | replan | progress | slice | report-id | log | find-branch | find-pr`. It
   lives in the plugin's shared `scripts/`, because `/asdlc:implement-prd` uses it outside Jira too.
 - `plan-approve.sh` — approval, split out of `plan-state.sh`. Human-only: reached only through
   `/asdlc:plan approve`, never pre-approved. Refuses invalid, edited and STALE plans.
