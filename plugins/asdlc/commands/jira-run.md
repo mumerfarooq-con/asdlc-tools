@@ -139,7 +139,7 @@ To implement a plan that is RUNNABLE, VALID and FRESH (KEY = its `ticket` field,
    = nothing saved: use empty strings). Use them as they are; it prints no other ticket text. Then:
    `${CLAUDE_PLUGIN_ROOT}/jira/scripts/review-mode.sh <TARGET_BRANCH> HEAD "<issue_type>" "<labels_csv>"`
    → prints `council` or `solo` (council when many files/lines changed, a sensitive path is
-   touched, or the ticket is Epic/Story/large). Run `/asdlc:review-pr <BRANCH> <TARGET_BRANCH> --id <ID>`,
+   touched, or the ticket is Epic/Story/large). A non-zero exit, or any other output, means `council`. Run `/asdlc:review-pr <BRANCH> <TARGET_BRANCH> --id <ID>`,
    appending ` --council` when the mode is `council`. (`--id` names the report `plans/pr-review-<ID>.md`.)
    - REQUEST_CHANGES → executor fixes on the SAME plan (max 2 cycles), commit, push, re-run the review.
    - APPROVE → do *After APPROVE: brief, then AI summary* (below, after step 6), then step 6.

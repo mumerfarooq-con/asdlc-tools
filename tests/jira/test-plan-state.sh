@@ -810,6 +810,24 @@ split="$(printf 'x%.0s' $(seq 1 299))—"
 run "$PS" log "$P" 1 TEST PASS "$split"; assert_eq "$CODE" "0" "split note exit"
 if tail -n1 "$P" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then ok; else nok "the cut left a broken UTF-8 character"; fi
 assert_eq "$(tail -n1 "$P" | wc -c | tr -d ' ')" "$(printf -- '- Task 1: TEST PASS — ' | wc -c | tr -d ' ' | awk '{print $1+299+1}')" "cut back to the last whole character"
+# A note of invalid bytes only: iconv prints nothing, and the line says "no note", never the raw bytes.
+run "$PS" log "$P" 1 TEST PASS $'\xe2\x80'; assert_eq "$CODE" "0" "invalid-only note exit"
+assert_eq "$(tail -n1 "$P")" "- Task 1: TEST PASS — no note" "invalid-only note logged as no note"
+assert_eq "$("$PS" check "$P" 2>/dev/null)" "RUNNABLE" "check still RUNNABLE after an invalid-only note"
+
+t "log with no iconv on PATH keeps printable ASCII only, so the line stays valid UTF-8"
+# Every PATH directory linked into one, minus iconv.
+noiconv="$SB/noiconv"; mkdir -p "$noiconv"
+( IFS=:; for d in $PATH; do [ -d "$d" ] && ln -s "$d"/* "$noiconv/" 2>/dev/null; done; true )
+rm -f "$noiconv/iconv"
+if PATH="$noiconv" command -v iconv >/dev/null 2>&1; then nok "iconv still on the test PATH"; else ok; fi
+cut150="a$(printf '—%.0s' $(seq 1 150))"
+run env PATH="$noiconv" "$PS" log "$P" 1 TEST PASS "$cut150"; assert_eq "$CODE" "0" "no-iconv exit"
+assert_eq "$(tail -n1 "$P")" "- Task 1: TEST PASS — a" "no-iconv: the split character and the rest are dropped"
+if tail -n1 "$P" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then ok; else nok "no-iconv left a broken UTF-8 character"; fi
+run env PATH="$noiconv" "$PS" log "$P" 1 TEST PASS "——"; assert_eq "$CODE" "0" "no-iconv non-ASCII-only exit"
+assert_eq "$(tail -n1 "$P")" "- Task 1: TEST PASS — no note" "no-iconv: nothing printable left is no note"
+assert_eq "$("$PS" check "$P" 2>/dev/null)" "RUNNABLE" "check still RUNNABLE after the no-iconv notes"
 
 t "log: no header, no progress line, a second progress line, no file"
 printf '# plain\n\n### Task 1: x\n' > plans/N.plan.md

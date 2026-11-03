@@ -284,14 +284,17 @@ case "$cmd" in
     lg_part="$(body_of "$plan" | approved_part)"
     printf '%s\n' "$lg_part" | LGN="$lg_task" awk '$0 ~ ("^### Task " ENVIRON["LGN"] "([^0-9]|$)") {f=1} END {exit !f}' \
       || die 2 "refusing: $plan has no '### Task $lg_task' above its progress line"
-    [ -n "$lg_note" ] || lg_note="no note"
-    # Cut at 300 bytes, then drop a multibyte character the cut split (agents write em dashes).
+    # Cut at 300 bytes, then drop a multibyte character the cut split (agents write em dashes) and any
+    # other invalid byte: a broken line makes awk fail in check. iconv -c exits 1 when it dropped bytes,
+    # so keep its output anyway. With no iconv, keep printable ASCII only.
     lg_note="$(printf '%s' "$lg_note" | LC_ALL=C cut -b1-300)"
-    # iconv -c exits 1 when it dropped bytes: keep its output anyway, unless it printed nothing.
     if command -v iconv >/dev/null 2>&1; then
-      lg_clean="$(printf '%s' "$lg_note" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || true)"
-      [ -z "$lg_clean" ] || lg_note="$lg_clean"
+      lg_note="$(printf '%s' "$lg_note" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || true)"
+    else
+      lg_note="$(printf '%s' "$lg_note" | LC_ALL=C tr -cd ' -~')"
     fi
+    # Nothing valid left (an empty note, or invalid bytes only): log "no note", never the raw bytes.
+    [ -n "$lg_note" ] || lg_note="no note"
     otmp="$(mktemp)"
     { cat "$plan"
       if [ -n "$(tail -c1 "$plan")" ]; then echo; fi

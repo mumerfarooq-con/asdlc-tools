@@ -426,6 +426,19 @@ assert_contains "$jr" 'jira-context.sh meta <KEY>' "jira-run step 5 gets the typ
 assert_contains "$jr" 'review-mode.sh <TARGET_BRANCH> HEAD "<issue_type>" "<labels_csv>"' "and passes them to review-mode.sh"
 assert_not_contains "$(grep -rn 'plan-state.sh log\|asdlc:progress' "$P/docs/plan-only-flow.md" | grep -v 'stamp')" 'plan-state.sh log' "the plan-only flow never logs"
 
+t "unstamped plans: Pipeline mode does not log or stamp, and each agent says what it does there (PR #10 SF-1)"
+assert_contains "$ip" 'If `log` exits 16 ("no header block")' "implement-prd names log's exit 16"
+assert_contains "$ip" 'never run `plan-state.sh stamp` here' "implement-prd says never to stamp"
+assert_contains "$ip" 'so Pipeline mode' "implement-prd says Pipeline mode does not log"
+efm="$(sed -n '/^---$/,/^---$/p' "$P/agents/prd-executor.md")"
+assert_not_contains "$efm" "updates the plan's task status" "the executor's description no longer says it always updates the plan"
+assert_contains "$efm" 'only when the' "the executor's description says when it marks the task"
+for a in prd-executor prd-reviewer prd-tester; do
+  assert_contains "$(contract "$P/agents/$a.md")" 'A plan without that line: see your *Verdict* or *On completion* section below.' "$a contract points unstamped plans at its own section"
+done
+assert_contains "$(cat "$P/agents/prd-reviewer.md")" 'In a plan that is not stamped, nothing records your verdict' "the reviewer says nothing records its verdict there"
+assert_contains "$jr" 'A non-zero exit, or any other output, means `council`.' "jira-run step 5: a failing review-mode.sh means council"
+
 t "no Glob or Grep for commands, no pre-approved rg or find, no agent Bash scope (M4a Task 5)"
 for f in "$P"/commands/*.md; do
   assert_not_contains "$(sed -n '/^allowed-tools:/p' "$f")" 'Glob' "$(basename "$f") allowed-tools has no Glob"
@@ -456,7 +469,13 @@ t "jira-run pre-approves everything the skills it runs pre-approve"
 # A skill run from inside jira-run gets only jira-run's pre-approvals (the 1.7.0 smoke: every
 # implement-prd "plan-state.sh log" call was refused until jira-run listed it).
 jr_tools="$(sed -n 's/^allowed-tools: //p' "$P/commands/jira-run.md" | tr ',' '\n' | sed 's/^ *//')"
+# The skills are jira-run's own Skill(asdlc:<name>) entries, so a new one is checked too.
+jr_skills="$(printf '%s\n' "$jr_tools" | sed -n 's/^Skill(asdlc:\([a-z0-9-]*\))$/\1/p')"
 for sk in implement-prd review-pr; do
+  printf '%s\n' "$jr_skills" | grep -qxF "$sk" && ok || nok "jira-run's Skill entries miss $sk (the list is not being read)"
+done
+for sk in $jr_skills; do
+  if [ -f "$P/commands/$sk.md" ]; then ok; else nok "jira-run runs Skill(asdlc:$sk) but commands/$sk.md is missing"; continue; fi
   while IFS= read -r rule; do
     [ -n "$rule" ] || continue
     if printf '%s\n' "$jr_tools" | grep -qxF -- "$rule"; then ok; else nok "jira-run lacks $sk's pre-approval: $rule"; fi

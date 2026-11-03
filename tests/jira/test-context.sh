@@ -964,6 +964,16 @@ assert_eq "$(tabbed "$OUT")" "BugX|ab,cd,ef,gid,hi,jk,large,31m" "unsafe charact
 assert_eq "$(printf '%s' "$OUT" | tr -d '[:print:]\t' | wc -c | tr -d ' ')" "0" "printable plus one tab"
 assert_eq "$(printf '%s' "$OUT" | tr -cd '\t' | wc -c | tr -d ' ')" "1" "exactly one tab"
 
+t "meta: no value starts with '-', so review-mode.sh never reads a type or label as an option"
+sandbox; mkdir -p plans/PROJ-1/raw
+jq -n '{key:"PROJ-1", fields:{issuetype:{name:"--fixtures"}, labels:["--conf","-x-y","---","$--conf","ok"]}}' > plans/PROJ-1/raw/issue.json
+run "$JC" meta PROJ-1; assert_eq "$CODE" "0" "exit"
+assert_eq "$(tabbed "$OUT")" "fixtures|conf,x-y,conf,ok" "leading dashes dropped, an all-dash label gone"
+mtype="$(printf '%s' "$OUT" | cut -f1)"; mlabels="$(printf '%s' "$OUT" | cut -f2)"
+git commit -q --allow-empty -m base
+run "$S/review-mode.sh" main HEAD "$mtype" "$mlabels"; assert_eq "$CODE" "0" "review-mode.sh takes meta's output"
+case "$OUT" in council|solo) ok ;; *) nok "review-mode.sh printed '$OUT', not a mode" ;; esac
+
 t "meta: at most 200 bytes"
 sandbox; mkdir -p plans/PROJ-1/raw
 jq -n --arg l "$(printf 'l%.0s' $(seq 1 150))" '{key:"PROJ-1", fields:{issuetype:{name:"Task"}, labels:[$l,$l,$l]}}' > plans/PROJ-1/raw/issue.json

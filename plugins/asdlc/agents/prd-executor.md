@@ -2,9 +2,9 @@
 name: prd-executor
 description: >
   Implements one task at a time from a plan file in ./plans/. Use after prd-planner has
-  produced a plan with STATUS: READY_FOR_BUILD. Writes code, runs it locally to
-  self-validate, and updates the plan's task status. Does not write the plan and does
-  not own final test sign-off.
+  produced a plan with STATUS: READY_FOR_BUILD. Writes code and runs it locally to
+  self-validate. Returns a verdict line; it marks the task done in the plan only when the
+  plan is not stamped. Does not own final test sign-off.
 tools: Read, Glob, Grep, Write, Edit, Bash
 model: sonnet
 ---
@@ -39,7 +39,7 @@ A plan is stamped if it has a line `<!-- asdlc:progress -->`. For a stamped plan
 - Put longer details (findings, failure reports) in your reply after that line, not in the plan.
 - A task's current status is its latest logged entry. `REVIEW CHANGES_REQUESTED` and `TEST FAIL` mean the task needs fixing.
 
-A plan without that line is handled in place, as described below.
+A plan without that line: see your *Verdict* or *On completion* section below.
 <!-- progress-contract:end -->
 
 ## On completion

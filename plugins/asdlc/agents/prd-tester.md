@@ -37,7 +37,7 @@ A plan is stamped if it has a line `<!-- asdlc:progress -->`. For a stamped plan
 - Put longer details (findings, failure reports) in your reply after that line, not in the plan.
 - A task's current status is its latest logged entry. `REVIEW CHANGES_REQUESTED` and `TEST FAIL` mean the task needs fixing.
 
-A plan without that line is handled in place, as described below.
+A plan without that line: see your *Verdict* or *On completion* section below.
 <!-- progress-contract:end -->
 
 ## Verdict (mandatory format)

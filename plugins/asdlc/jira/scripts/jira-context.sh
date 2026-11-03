@@ -589,8 +589,9 @@ cmd_check() {
 # What jira-run passes to review-mode.sh: the saved issue's type and labels, nothing else of the ticket.
 # Reads plans/<KEY>/raw/ (issue.json for REST, the MCP view of mcp-issue.json), whichever source
 # fetch.json names. Prints "<issue_type><TAB><labels_csv>": only [A-Za-z0-9 ._:+/-] survives in each value
-# (no quote, $, backtick or control character can reach a command line), commas are dropped from a label,
-# and the line is at most 200 bytes with its newline. Anything missing, symlinked or unreadable prints an empty line.
+# (no quote, $, backtick or control character can reach a command line), a leading '-' is dropped (so no
+# value reads as an option such as --conf), commas are dropped from a label, and the line is at most 200
+# bytes with its newline. Anything missing, symlinked or unreadable prints an empty line.
 cmd_meta() {
   [ $# -eq 1 ] && asdlc_is_key "$1" || usage
   local key="$1" raw="plans/$1/raw" src d="" out="" file
@@ -604,7 +605,7 @@ cmd_meta() {
   else file="$raw/issue.json"; fi
   [ -f "$file" ] && [ ! -L "$file" ] || meta_none
   out="$(jq -r --arg k "$key" 'select(.key == $k) | .fields as $f
-      | def clean: if type == "string" then gsub("[^A-Za-z0-9 ._:+/-]"; "") else "" end;
+      | def clean: if type == "string" then gsub("[^A-Za-z0-9 ._:+/-]"; "") | sub("^-+"; "") else "" end;
         "\($f.issuetype.name | clean)\t\([($f.labels // [])[] | clean | select(. != "")] | join(","))"' "$file" 2>/dev/null)" || meta_none
   [ -n "$d" ] && rm -rf "$d"
   # The jq program removes every tab and newline from the values; keep only the one tab it added.

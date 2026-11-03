@@ -40,13 +40,15 @@ A plan is stamped if it has a line `<!-- asdlc:progress -->`. For a stamped plan
 - Put longer details (findings, failure reports) in your reply after that line, not in the plan.
 - A task's current status is its latest logged entry. `REVIEW CHANGES_REQUESTED` and `TEST FAIL` mean the task needs fixing.
 
-A plan without that line is handled in place, as described below.
+A plan without that line: see your *Verdict* or *On completion* section below.
 <!-- progress-contract:end -->
 
 ## Verdict
 **Task mode** — report in chat, with the verdict as the first line. You never write or edit the plan; for a stamped plan the orchestrator logs your verdict:
 - `REVIEW: APPROVED` (stamped plan: `REVIEW APPROVED — <note>`) — may include MINOR notes.
 - `REVIEW: CHANGES_REQUESTED` (stamped plan: `REVIEW CHANGES_REQUESTED — <note>`) — any BLOCKER/MAJOR present. Each finding: file:line, issue, why it matters, suggested fix direction.
+
+In a plan that is not stamped, nothing records your verdict: the orchestrator acts on the verdict in your reply.
 
 **Retrospective mode** — write a full report to `./plans/<prd-slug>.review.md` (the only file you write):
 - Summary verdict, findings grouped by severity (file:line each), positive observations, and a "Suggested follow-up tasks" section formatted so prd-planner can turn it into a fix-up plan.

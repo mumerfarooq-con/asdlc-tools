@@ -28,11 +28,15 @@ You coordinate only — route all planning, coding, review, and testing through 
       - On `TEST: FAIL`, re-invoke `prd-executor` with the failure report, then re-run the reviewer ONLY if the fix touched files beyond the original task scope; otherwise go straight back to the tester. Max 2 fix attempts, then escalate.
    d. On `TEST: PASS`, proceed to the next task.
 
-   **Logging (stamped plans):** the agents never write the plan. After each agent returns, you run
+   **Logging (stamped plans only):** the plan from step 1 is not stamped (only `--plan-only` stamps), so Pipeline mode
+   does not log: the executor and tester update the task in that plan themselves. Execute mode runs this step on a
+   stamped plan, where the agents never write the plan. There, after each agent returns, you run
    `${CLAUDE_PLUGIN_ROOT}/scripts/plan-state.sh log <plan> <n> <ROLE> <VERDICT> "<note>"` once, with the verdict it returned,
    where `<ROLE> <VERDICT>` is exactly one of `EXECUTOR DONE`, `EXECUTOR BLOCKED`, `REVIEW APPROVED`, `REVIEW CHANGES_REQUESTED`,
    `TEST PASS`, `TEST FAIL` (two arguments: the role, then the verdict), and `<note>` is the one-line note from its verdict line.
-   If `log` refuses because the plan has no progress line (not a stamped plan), skip logging; any other refusal means a wrong argument, so fix it. Never edit the plan file yourself.
+   If `log` exits 16 ("no header block") or refuses because the plan has no progress line, the plan is not stamped:
+   stop calling `log` for this run, and never run `plan-state.sh stamp` here. Any other refusal means a wrong argument,
+   so fix it. Never edit the plan file yourself.
 
    Independent tasks (no shared files, no dependency edge) may execute in parallel; review and test steps still run per task.
 

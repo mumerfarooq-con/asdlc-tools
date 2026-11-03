@@ -266,6 +266,11 @@ model could call the same tools without the hook. Treat the captures like `plans
 git (`plans/*/` and `plans/.mcp/` are covered by the ignore lines above) and review what a run asks
 to confirm.
 
+One channel of ticket text stays open on purpose: `jira-context.sh meta <KEY>` gives `jira-run` the
+issue type and labels for `review-mode.sh`. It passes at most 199 bytes of letters, digits, spaces and
+`._:+/-`, with no leading `-`, so a reporter-set label can still read like an instruction. The values are
+only ever arguments to `review-mode.sh`, and no pre-approved command reaches `approve` or `force-unlock`.
+
 ### Capture protocol
 The one description of how a script, the hook and `jira-run.md` hand an MCP call to each other. The
 scripts (`jira/scripts/mcp-lib.sh`, `jira-mine.sh`), the hook header (`hooks/mcp-capture.sh`) and
