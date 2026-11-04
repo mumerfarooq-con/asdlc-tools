@@ -33,7 +33,7 @@ This repository is both the plugin source and its marketplace.
 | `/asdlc:plan approve\|replan\|validate <ID>` | Approves, re-plans or validates a plan file. Human-only: the model never runs it on its own. |
 | `/asdlc:jira-run` | **Jira leg.** Runs every plan you have approved (implement, open a Bitbucket PR, review, fix), then plans your new tickets and stops for approval. Flags: `--key`, `--sprint`, `--status`, `--plan-only`, `--execute-only`, `--reset-executing`. |
 | `/asdlc:jira-setup` | One-time setup for `/asdlc:jira-run` in a repo: writes the project config, checks your tokens with test calls, and adds the docs templates. |
-| `/asdlc:review-pr <pr>` | **PR Review.** A single reviewer by default, or a three-panelist council plus chair with `--council`. Works with GitHub, Bitbucket, or a local branch. |
+| `/asdlc:review-pr <pr>` | **PR Review.** A single reviewer by default, or a three-panelist council plus chair with `--council`. Works with GitHub PRs, Bitbucket PRs (through a Bitbucket MCP server with pull-request tools), or a local branch. |
 | `/asdlc:review-tour <PR id \| PR URL \| KEY>` | **Human review.** Walks you through the riskiest hunks of a PR, one behaviour question each, and records the hunks you answered. Never approves or merges. |
 | `/asdlc:pdqc` | **Pre-Delivery Quality Check.** Five inspectors and a QA chair review the whole codebase for the cross-cutting issues that per-PR review can't see. It produces findings and remediation work items, and never edits code. |
 
@@ -41,7 +41,7 @@ This repository is both the plugin source and its marketplace.
 
 - **Claude Code**: the terminal, an IDE extension, or the Code tab of the Claude desktop app.
 - **All workflows:** `bash` and `git`. [ripgrep](https://github.com/BurntSushi/ripgrep) is optional; the impact scan falls back to `grep` with identical output.
-- **`/asdlc:review-pr`:** the [`gh`](https://cli.github.com/) CLI, signed in, for GitHub PRs. For Bitbucket PRs, a connected Atlassian/Bitbucket MCP server. Without either, it reviews a local branch diff.
+- **`/asdlc:review-pr`:** the [`gh`](https://cli.github.com/) CLI, signed in, for GitHub PRs. For Bitbucket PRs by URL or number, a Bitbucket MCP server with pull-request tools; the claude.ai Atlassian connector has none. Without these, review the PR's source branch as a local diff: `/asdlc:review-pr <branch> <base>`.
 - **Jira leg:** Jira Cloud and Bitbucket Cloud, `curl` and `jq`. For Jira, either the Atlassian MCP connector (connected in Claude Code, no token needed) or an API token in your shell environment (`JIRA_EMAIL`, `JIRA_TOKEN`); with the connector the token is optional and only adds image downloads, watchers, sprints and status-name checks. For Bitbucket, `BITBUCKET_TOKEN`. Tokens never go in a file. See the [Jira leg guide](plugins/asdlc/jira/README.md).
 - **PDQC calibration (optional):** Python 3.
 

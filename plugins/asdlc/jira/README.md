@@ -349,7 +349,8 @@ settings allow them.
 **Permission prompts after a pause.** A `jira-run` that resumes with `-p --resume` after its first
 confirmation pause may stop applying the command's `allowed-tools`, so the harness can prompt for scripts
 the command pre-approves. Approve them, or add them to your own settings. The prompts do not work
-around it. (Seen in a two-slice smoke test; verify interactively.)
+around it. (Seen once in a headless two-slice smoke test; an interactive run on Claude Code 2.1.294
+did not show it.)
 
 **No Glob or Grep.** The main session has no Glob or Grep tool, so a command never searches by pattern:
 it reads a known path or calls a script (for example `plan-state.sh find-branch <branch>`). The plugin

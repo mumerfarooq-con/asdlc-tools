@@ -12,7 +12,7 @@ Parse arguments:
 
 ## Preflight
 - GitHub mode: confirm `gh` is authenticated (`gh auth status`). If not, tell the user to run `gh auth login`, and offer local mode.
-- Bitbucket mode: confirm the Atlassian/Bitbucket MCP server is connected (the server named by `ASDLC_BB_MCP_SERVER` in the user's environment; the Atlassian one by default if that is unset). If not, tell the user to run `/mcp`, and offer local mode.
+- Bitbucket mode (a PR URL, or a PR number on a bitbucket.org remote) needs a Bitbucket MCP server with pull-request tools. If `ASDLC_BB_MCP_SERVER` is set in the user's environment, only that server's tools count; if it is unset, any connected server's do. A connected server is not enough: the claude.ai Atlassian connector has Jira and Confluence tools and no pull-request tool. Before starting, look for a pull-request tool (one that gets a PR or its diff) among the MCP tools available to you, deferred ones included. If there is none, say: "Reviewing a Bitbucket PR by URL or number needs a Bitbucket MCP server with pull-request tools; the claude.ai Atlassian connector has none. If you have such a server, connect it with `/mcp`. Otherwise review the PR's source branch (shown on the PR page): `/asdlc:review-pr <branch> <base>`." Then offer local mode, and start no reviewer. A disconnected server shows no tools, so this message covers that case too.
 - Local mode: `git rev-parse --verify` the branch and base; try `origin/<branch>` after a fetch if missing; ask the user if still missing.
 
 ## Solo mode (default — cheap, for routine PRs)

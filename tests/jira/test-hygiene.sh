@@ -463,7 +463,7 @@ for f in "$P"/agents/*.md; do
 done
 assert_contains "$(grep '^allowed-tools:' "$P/commands/review-tour.md")" 'plan-state.sh find-branch:*' "the tour pre-approves find-branch"
 assert_contains "$(cat "$P/commands/review-tour.md")" 'plan-state.sh find-branch <branch>' "the tour calls find-branch"
-assert_contains "$(cat "$P/jira/README.md")" 'verify interactively' "the README notes the allowed-tools lapse"
+assert_contains "$(cat "$P/jira/README.md")" 'Seen once in a headless two-slice smoke test' "the README notes the allowed-tools lapse and where it was seen"
 
 t "jira-run pre-approves everything the skills it runs pre-approve"
 # A skill run from inside jira-run gets only jira-run's pre-approvals (the 1.7.0 smoke: every
@@ -529,5 +529,37 @@ assert_contains "$(grep '^allowed-tools:' "$P/commands/review-tour.md")" 'plan-s
 assert_contains "$(cat "$P/commands/review-tour.md")" 'plan-state.sh find-pr <id>' "the tour calls find-pr"
 assert_contains "$(cat "$P/commands/review-tour.md")" 'more than one plan claims it, STOP' "the tour stops when two plans claim the PR"
 assert_not_contains "$(cat "$P/commands/review-tour.md")" 'ask me for the ticket KEY' "the tour does not ask for the KEY when it has a PR id"
+
+t "Bitbucket PRs by URL or number need a server with pull-request tools; the Atlassian connector has none (1.7.1 F-1)"
+rp="$(cat "$P/commands/review-pr.md")"
+assert_contains "$rp" 'or a PR number on a bitbucket.org remote' "the preflight covers a bare PR number"
+assert_contains "$rp" 'look for a pull-request tool' "review-pr checks for a pull-request tool, not a connected server"
+assert_contains "$rp" 'deferred ones included' "including deferred MCP tools"
+assert_contains "$rp" 'only that server' "a set ASDLC_BB_MCP_SERVER limits the check to that server"
+assert_contains "$rp" 'connect it with `/mcp`' "the message keeps the /mcp hint for a disconnected server"
+assert_contains "$rp" 'review the PR'"'"'s source branch (shown on the PR page): `/asdlc:review-pr <branch> <base>`' "and offers the source branch"
+assert_contains "$rp" 'start no reviewer' "and starts no reviewer without one"
+hits="$(grep -rnF -e 'Atlassian/Bitbucket MCP' -e 'via the Atlassian MCP' -e 'the Atlassian one by default' "$ROOT/README.md" "$ROOT/CONTRIBUTING.md" "$P" || true)"
+assert_eq "$hits" "" "no doc says the Atlassian connector reads PRs"
+assert_contains "$(cat "$ROOT/README.md")" 'the claude.ai Atlassian connector has none' "the README names the gap"
+assert_contains "$(cat "$P/README.md")" 'the claude.ai Atlassian connector has none' "the plugin README names the gap"
+assert_contains "$(cat "$P/agents/pr-reviewer.md")" "the Bitbucket MCP server's pull-request tools" "pr-reviewer reads PRs with pull-request tools"
+
+t "agent descriptions: no proactive planner, the executor's plans, one BLOCKED rule (1.7.1 F-2..F-4)"
+assert_eq "$(grep -rn 'PROACTIVELY' "$P/agents" || true)" "" "no agent asks to be used proactively"
+assert_contains "$(sed -n '/^---$/,/^---$/p' "$P/agents/prd-planner.md")" 'Invoked by /asdlc:implement-prd and /asdlc:jira-run' "the planner names its callers"
+assert_contains "$(sed -n '/^---$/,/^---$/p' "$P/agents/prd-executor.md")" 'or a stamped plan the human approved' "the executor's description covers stamped plans"
+# Count occurrences, not lines: a second rule on the same line, or in other words, still repeats one of these.
+eb="$(sed '/<!-- progress-contract:start -->/,/<!-- progress-contract:end -->/d' "$P/agents/prd-executor.md")"
+assert_eq "$(printf '%s\n' "$eb" | grep -o 'BLOCKED' | wc -l | tr -d ' ')" "2" "prd-executor's one rule names EXECUTOR BLOCKED and the plan's BLOCKED once each"
+assert_eq "$(printf '%s\n' "$eb" | grep -o 'EXECUTOR BLOCKED' | wc -l | tr -d ' ')" "1" "prd-executor states EXECUTOR BLOCKED once, outside the contract block"
+assert_eq "$(printf '%s\n' "$eb" | grep -oi 'improvise' | wc -l | tr -d ' ')" "1" "and says never improvise once"
+
+t "the README's subagent count and table match agents/ (1.7.1 F-6)"
+n_files="$(ls "$P"/agents/*.md | wc -l | tr -d ' ')"
+assert_eq "$(sed -n 's/^All \([0-9][0-9]*\) subagents.*/\1/p' "$ROOT/README.md")" "$n_files" "README's subagent count"
+for af in "$P"/agents/*.md; do
+  assert_contains "$(cat "$ROOT/README.md")" "\`$(basename "$af" .md)\`" "README lists $(basename "$af" .md)"
+done
 
 finish

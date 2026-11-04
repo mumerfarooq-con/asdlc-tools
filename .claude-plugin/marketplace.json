@@ -1,7 +1,7 @@
 {
   "name": "asdlc-tools",
   "owner": {
-    "name": "Conovo Platform"
+    "name": "Umer Farooq"
   },
   "description": "ASDLC: agentic SDLC workflows for Claude Code (PRD Implementor, Jira leg, PR review council, PDQC)",
   "plugins": [

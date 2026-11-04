@@ -1,9 +1,9 @@
 ---
 name: prd-planner
 description: >
-  Breaks a PRD into an ordered, dependency-aware implementation plan. Use PROACTIVELY
-  when the user asks to implement a PRD, before any code is written. Reads the PRD and
-  root CLAUDE.md, then writes a plan file to ./plans/. Does NOT write application code.
+  Invoked by /asdlc:implement-prd and /asdlc:jira-run to break a PRD into an ordered,
+  dependency-aware implementation plan. Reads the PRD and root CLAUDE.md, writes a plan
+  file to ./plans/, and never writes application code.
 tools: Read, Glob, Grep, Write
 model: opus
 ---

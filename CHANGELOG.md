@@ -4,6 +4,21 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.7.1] - 2026-11-03
+
+Docs and agent descriptions. No script changes.
+
+### Fixed
+
+- **Bitbucket PRs by URL or number in `/asdlc:review-pr`.** They need a Bitbucket MCP server with pull-request tools, and the claude.ai Atlassian connector has none. The docs said a connected Atlassian server was enough. The preflight now looks for a pull-request tool (deferred tools included; only the `ASDLC_BB_MCP_SERVER` server's when that is set), not just a connected server. Without one, it says so before any review starts, points to `/mcp` for a server that isn't connected, and offers the PR's source branch instead: `/asdlc:review-pr <branch> <base>`. `/asdlc:jira-run` is unchanged: it reviews the local branch, and reaches Bitbucket through its API (or a Bitbucket MCP profile with `BB_TRANSPORT=mcp`).
+- **`prd-planner` no longer asks to be used proactively.** Its description now says `/asdlc:implement-prd` and `/asdlc:jira-run` invoke it, so other requests in a session with the plugin are not sent to it.
+
+### Changed
+
+- **`prd-executor`.** Its description covers both kinds of plan it runs: a Pipeline-mode plan with `STATUS: READY_FOR_BUILD`, or a stamped plan the human approved. Its two BLOCKED rules are now one.
+- **The plugin's author and the marketplace owner** are the license holder, not a team name.
+- **The Jira guide's note on permission prompts after a pause** says an interactive run did not show them.
+
 ## [1.7.0] - 2026-11-03
 
 Groundwork for the ticket check (M4b). Plans, approvals and fingerprints are unchanged.
