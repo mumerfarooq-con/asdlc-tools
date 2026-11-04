@@ -41,7 +41,7 @@ This repository is both the plugin source and its marketplace.
 
 - **Claude Code**: the terminal, an IDE extension, or the Code tab of the Claude desktop app.
 - **All workflows:** `bash` and `git`. [ripgrep](https://github.com/BurntSushi/ripgrep) is optional; the impact scan falls back to `grep` with identical output.
-- **`/asdlc:review-pr`:** the [`gh`](https://cli.github.com/) CLI, signed in, for GitHub PRs. For Bitbucket PR URLs, a Bitbucket MCP server with pull-request tools; the claude.ai Atlassian connector has none. Without these, review the PR's branch as a local diff: `/asdlc:review-pr <branch> <base>`.
+- **`/asdlc:review-pr`:** the [`gh`](https://cli.github.com/) CLI, signed in, for GitHub PRs. For Bitbucket PRs by URL or number, a Bitbucket MCP server with pull-request tools; the claude.ai Atlassian connector has none. Without these, review the PR's source branch as a local diff: `/asdlc:review-pr <branch> <base>`.
 - **Jira leg:** Jira Cloud and Bitbucket Cloud, `curl` and `jq`. For Jira, either the Atlassian MCP connector (connected in Claude Code, no token needed) or an API token in your shell environment (`JIRA_EMAIL`, `JIRA_TOKEN`); with the connector the token is optional and only adds image downloads, watchers, sprints and status-name checks. For Bitbucket, `BITBUCKET_TOKEN`. Tokens never go in a file. See the [Jira leg guide](plugins/asdlc/jira/README.md).
 - **PDQC calibration (optional):** Python 3.
 

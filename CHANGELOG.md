@@ -10,7 +10,7 @@ Docs and agent descriptions. No script changes.
 
 ### Fixed
 
-- **Bitbucket PR URLs in `/asdlc:review-pr`.** They need a Bitbucket MCP server with pull-request tools, and the claude.ai Atlassian connector has none. The docs said a connected Atlassian server was enough. The preflight now checks for a pull-request tool, not just a connected server. Without one, it says so before any review starts and offers the branch instead: `/asdlc:review-pr <branch> <base>`. `/asdlc:jira-run` is unchanged: it reviews the local branch and calls Bitbucket through its API.
+- **Bitbucket PRs by URL or number in `/asdlc:review-pr`.** They need a Bitbucket MCP server with pull-request tools, and the claude.ai Atlassian connector has none. The docs said a connected Atlassian server was enough. The preflight now looks for a pull-request tool (deferred tools included; only the `ASDLC_BB_MCP_SERVER` server's when that is set), not just a connected server. Without one, it says so before any review starts, points to `/mcp` for a server that isn't connected, and offers the PR's source branch instead: `/asdlc:review-pr <branch> <base>`. `/asdlc:jira-run` is unchanged: it reviews the local branch, and reaches Bitbucket through its API (or a Bitbucket MCP profile with `BB_TRANSPORT=mcp`).
 - **`prd-planner` no longer asks to be used proactively.** Its description now says `/asdlc:implement-prd` and `/asdlc:jira-run` invoke it, so other requests in a session with the plugin are not sent to it.
 
 ### Changed
