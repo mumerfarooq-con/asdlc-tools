@@ -463,7 +463,7 @@ for f in "$P"/agents/*.md; do
 done
 assert_contains "$(grep '^allowed-tools:' "$P/commands/review-tour.md")" 'plan-state.sh find-branch:*' "the tour pre-approves find-branch"
 assert_contains "$(cat "$P/commands/review-tour.md")" 'plan-state.sh find-branch <branch>' "the tour calls find-branch"
-assert_contains "$(cat "$P/jira/README.md")" 'verify interactively' "the README notes the allowed-tools lapse"
+assert_contains "$(cat "$P/jira/README.md")" 'Seen once in a headless two-slice smoke test' "the README notes the allowed-tools lapse and where it was seen"
 
 t "jira-run pre-approves everything the skills it runs pre-approve"
 # A skill run from inside jira-run gets only jira-run's pre-approvals (the 1.7.0 smoke: every
@@ -529,5 +529,31 @@ assert_contains "$(grep '^allowed-tools:' "$P/commands/review-tour.md")" 'plan-s
 assert_contains "$(cat "$P/commands/review-tour.md")" 'plan-state.sh find-pr <id>' "the tour calls find-pr"
 assert_contains "$(cat "$P/commands/review-tour.md")" 'more than one plan claims it, STOP' "the tour stops when two plans claim the PR"
 assert_not_contains "$(cat "$P/commands/review-tour.md")" 'ask me for the ticket KEY' "the tour does not ask for the KEY when it has a PR id"
+
+t "Bitbucket PR URLs need a server with pull-request tools; the Atlassian connector has none (1.7.1 F-1)"
+rp="$(cat "$P/commands/review-pr.md")"
+assert_not_contains "$rp" 'the Atlassian one by default' "review-pr does not default to the Atlassian connector"
+assert_contains "$rp" 'check your tool list for a pull-request tool' "review-pr checks for a pull-request tool, not a connected server"
+assert_contains "$rp" 'Review the branch instead: `/asdlc:review-pr <branch> <base>`' "and offers the branch"
+assert_contains "$rp" 'start no reviewer' "and starts no reviewer without one"
+hits="$(grep -rnF -e 'Atlassian/Bitbucket MCP' -e 'via the Atlassian MCP' "$ROOT/README.md" "$P/README.md" "$P/commands" "$P/agents" || true)"
+assert_eq "$hits" "" "no doc says the Atlassian connector reads PRs"
+assert_contains "$(cat "$ROOT/README.md")" 'the claude.ai Atlassian connector has none' "the README names the gap"
+assert_contains "$(cat "$P/README.md")" 'the claude.ai Atlassian connector has none' "the plugin README names the gap"
+assert_contains "$(cat "$P/agents/pr-reviewer.md")" "the Bitbucket MCP server's pull-request tools" "pr-reviewer reads PRs with pull-request tools"
+
+t "agent descriptions: no proactive planner, the executor's plans, one BLOCKED rule (1.7.1 F-2..F-4)"
+assert_eq "$(grep -rn 'PROACTIVELY' "$P/agents" || true)" "" "no agent asks to be used proactively"
+assert_contains "$(sed -n '/^---$/,/^---$/p' "$P/agents/prd-planner.md")" 'Invoked by /asdlc:implement-prd and /asdlc:jira-run' "the planner names its callers"
+assert_contains "$(sed -n '/^---$/,/^---$/p' "$P/agents/prd-executor.md")" 'or a stamped plan the human approved' "the executor's description covers stamped plans"
+eb="$(sed '/<!-- progress-contract:start -->/,/<!-- progress-contract:end -->/d' "$P/agents/prd-executor.md" | grep -c 'BLOCKED' || true)"
+assert_eq "$eb" "1" "prd-executor states its BLOCKED rule once, outside the contract block"
+
+t "the README's subagent count and table match agents/ (1.7.1 F-6)"
+n_files="$(ls "$P"/agents/*.md | wc -l | tr -d ' ')"
+assert_eq "$(sed -n 's/^All \([0-9][0-9]*\) subagents.*/\1/p' "$ROOT/README.md")" "$n_files" "README's subagent count"
+for af in "$P"/agents/*.md; do
+  assert_contains "$(cat "$ROOT/README.md")" "\`$(basename "$af" .md)\`" "README lists $(basename "$af" .md)"
+done
 
 finish

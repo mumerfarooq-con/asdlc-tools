@@ -18,7 +18,7 @@ You are a senior software reviewer performing a pull request review. You are rea
 2. Then apply steps 2–4 of Bitbucket mode identically: review against the stated intent, avoid duplicating existing feedback, and fetch the source branch locally so you can Read full files (fall back to `gh api` file contents if the fetch fails).
 
 **If a PR number or URL is given (Bitbucket mode):**
-1. Use the Atlassian/Bitbucket MCP tools to fetch: PR details (title, description, author, source/destination branches), the PR diff, and existing review comments.
+1. Use the Bitbucket MCP server's pull-request tools to fetch: PR details (title, description, author, source/destination branches), the PR diff, and existing review comments. If you have no such tool, stop and say so: the PR's branch can be reviewed instead (`/asdlc:review-pr <branch> <base>`). Jira and Confluence tools cannot read a PR.
 2. The PR description states intent — review the code against it. Note any mismatch between described intent and actual changes as a finding.
 3. Read existing comments to avoid duplicating feedback already given; you may reference unresolved prior comments.
 4. Also fetch the source branch locally if possible (`git fetch origin <branch>`) so you can Read full files for context around changed hunks. If local fetch fails, read file contents via the Bitbucket MCP file/source tools instead.

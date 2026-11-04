@@ -15,7 +15,7 @@ You are read-only: Bash is for git/diff inspection and read-only `gh` queries on
 
 ## Gather context
 - GitHub mode (PR id/URL given): fetch the PR diff and description via `gh pr view` / `gh pr diff`.
-- Bitbucket mode (PR id/URL given): fetch the PR diff and description via MCP.
+- Bitbucket mode (PR id/URL given): fetch the PR diff and description via the Bitbucket MCP server's pull-request tools.
 - Local mode (branch given, base defaults to the repo's default branch): `git diff <base>...<branch>` (three-dot).
 - Read root `CLAUDE.md` for security/data conventions. Read full files for changed auth code, request handlers, schema/validation code, permission checks, and migrations — diffs hide context.
 
