@@ -202,4 +202,10 @@ for s in 'bash tests/ovo/run.sh' 'claude plugin validate --strict plugins/ovo' '
   assert_contains "$CB" "$s" "CONTRIBUTING has: $s"
 done
 
+t "frontmatter: no unquoted value starts a YAML flow sequence or map (CI's validator drops the whole frontmatter: allowed-tools, disable-model-invocation)"
+for f in "$ROOT"/plugins/*/commands/*.md "$ROOT"/plugins/*/agents/*.md; do
+  [ -f "$f" ] || continue
+  assert_eq "$(fm "$f" | grep -nE '^[A-Za-z-]+:[[:space:]]+[[{]' || true)" "" "${f#"$ROOT"/} has an unquoted [ or { value"
+done
+
 finish

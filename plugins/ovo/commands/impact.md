@@ -1,6 +1,6 @@
 ---
 description: What else uses the code you are about to change? Finds every place the changed fields, functions and config keys are used, says which still work, and lists what to check. Read-only; zero setup.
-argument-hint: [what you are about to change] [--also <dir>]... [--base <ref>]
+argument-hint: "[what you are about to change] [--also <dir>]... [--base <ref>]"
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ovo-dir.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/base.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/impact.sh:*), Read
 ---
 

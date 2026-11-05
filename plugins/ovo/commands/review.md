@@ -1,6 +1,6 @@
 ---
 description: Review your branch or a PR before a teammate does - one reviewer, or a three-lens council with --council. Numbered findings and the hunks a human must read. Read-only; never posts.
-argument-hint: [<branch> [<base>] | <pr-url>] [--council]
+argument-hint: "[<branch> [<base>] | <pr-url>] [--council]"
 disable-model-invocation: true
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ovo-dir.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-target.sh:*), Read
 ---
