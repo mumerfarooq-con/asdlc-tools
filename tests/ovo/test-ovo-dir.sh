@@ -15,9 +15,9 @@ for d in .ovo .ovo/impact .ovo/impact/run-1; do assert_eq "$(perm "$d")" "drwx--
 
 t "the first use writes .ovo/.gitignore = *: the directory ignores itself, git status stays clean"
 assert_eq "$(cat .ovo/.gitignore)" "*" ".gitignore content"
-echo x > .ovo/impact/run-1/report.md
+echo x > .ovo/impact/run-1/impact.md
 assert_eq "$(git status --porcelain)" "" "git status after writing a report"
-assert_eq "$(git check-ignore -q .ovo/impact/run-1/report.md && echo ignored)" "ignored" "report is ignored"
+assert_eq "$(git check-ignore -q .ovo/impact/run-1/impact.md && echo ignored)" "ignored" "report is ignored"
 assert_eq "$(git diff --name-only; git ls-files --others --exclude-standard)" "" "no tracked or untracked file outside the ignore"
 t "a later use keeps the user's own .gitignore"
 printf '*\n!keep\n' > .ovo/.gitignore

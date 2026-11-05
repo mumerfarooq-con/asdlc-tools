@@ -38,7 +38,7 @@ Run `${CLAUDE_PLUGIN_ROOT}/scripts/impact.sh <id>`, adding `--also <dir>` for ea
 ## 5. Analyst
 Invoke `impact-analyst` with only: `<id>`, the mode, the `--also` dirs (or "none"), and the paths `.ovo/impact/<id>/hits.md`, `.ovo/impact/<id>/terms.txt`, and `.ovo/impact/<id>/intent.md` (intent mode) or `.ovo/impact/<id>/diff.patch` (diff mode).
 - It replies `RESCAN` → run step 4 again (pass 2, same flags), then invoke it once more.
-- A second `RESCAN` is not allowed: say the scan wanted a third pass, give `.ovo/impact/<id>.md` if it exists, and STOP.
+- A second `RESCAN` is not allowed: say the scan wanted a third pass, give `.ovo/impact/<id>/impact.md` if it exists, and STOP.
 
 ## 6. Reply
 At most 25 lines, in this order:

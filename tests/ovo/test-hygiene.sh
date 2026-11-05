@@ -131,7 +131,7 @@ assert_contains "$(cat "$IMP")" "env or config key, permission class and FE-faci
 t "impact-analyst: Read, Glob, Grep and Write only; writes its report, the Not searched rules, the FE hint (critic 7)"
 IA="$O/agents/impact-analyst.md"
 assert_eq "$(fm "$IA" | sed -n 's/^tools:[[:space:]]*//p')" "Read, Glob, Grep, Write" "tools"
-for s in '.ovo/impact/<id>.md' '## What else uses this' '## Must still work' '## Not searched' 'FE not checked: re-run with `--also ../<fe-repo>`' \
+for s in '.ovo/impact/<id>/impact.md' '## What else uses this' '## Must still work' '## Not searched' 'FE not checked: re-run with `--also ../<fe-repo>`' \
          'reply `RESCAN`' 'says `Pass: 1`' 'needs change' 'unsure' 'At most 22 lines'; do
   assert_contains "$(cat "$IA")" "$s" "impact-analyst says: $s"
 done
@@ -140,7 +140,7 @@ t "/ovo:review: user-invoked only, never offers to post, the reply shape (D-O12,
 RV="$O/commands/review.md"
 assert_contains "$(fm "$RV")" "disable-model-invocation: true" "review is user-invoked only"
 for s in 'ovo-dir.sh review --new' 'review-target.sh <id>' 'never `--council`' 'Start no reviewer' 'in parallel, in the foreground' \
-         'invoke `chair`' 'BLOCKER first, at most 12' 'Risk tier: <tier>' 'Report: .ovo/review/<id>/report.md' 'Say which to fix, e.g. `fix 1 and 3`.' \
+         'invoke `chair`' 'BLOCKER first, at most 12' 'Risk tier: <tier>' 'Report: .ovo/review/<id>/review.md' 'Say which to fix, e.g. `fix 1 and 3`.' \
          'never offer to' 'at most 25 lines' '.ovo/review/<id>/security.md' '.ovo/review/<id>/correctness.md' \
          '.ovo/review/<id>/architecture.md' 'pass no other path' 'Never change a finding.'; do
   assert_contains "$(cat "$RV")" "$s" "review.md says: $s"
@@ -150,7 +150,7 @@ for a in reviewer lens-security lens-correctness lens-architecture chair; do
 done
 
 t "review agents: each writes only its own file under .ovo/review/<id>/, read-only tools, no fetching"
-for pair in reviewer:report.md lens-security:security.md lens-correctness:correctness.md lens-architecture:architecture.md chair:report.md; do
+for pair in reviewer:review.md lens-security:security.md lens-correctness:correctness.md lens-architecture:architecture.md chair:review.md; do
   a="${pair%%:*}"; f="${pair#*:}"; A="$(cat "$O/agents/$a.md")"
   assert_contains "$A" "the only file you write is \`.ovo/review/<id>/$f\`" "$a writes only $f"
   assert_eq "$(fm "$O/agents/$a.md" | sed -n 's/^tools:[[:space:]]*//p')" "Read, Glob, Grep, Write" "$a tools"
@@ -159,6 +159,12 @@ done
 for a in reviewer chair; do
   assert_contains "$(cat "$O/agents/$a.md")" "Number the findings 1..n across" "$a numbers findings across severities"
 done
+
+t "every .ovo/ file an agent or command names is one a subagent may write: not report*, summary*, findings* or analysis*, not named from <id>"
+# Claude Code 2.1.294 refuses a subagent Write whose basename matches ^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$, any case.
+paths="$(cd "$O" && grep -oHE '\.ovo/[A-Za-z0-9._<>/-]*\.md' agents/*.md commands/*.md | LC_ALL=C sort -u)"
+assert_contains "$paths" "agents/reviewer.md:.ovo/review/<id>/" "the .ovo/ paths were read"
+assert_eq "$(printf '%s\n' "$paths" | grep -iE '/((report|summary|findings|analysis)[^/]*|<id>[^/]*)\.md$' || true)" "" "a path the CLI refuses a subagent, or one named from <id> (it starts with the branch)"
 
 t "the Human must read contract is asdlc's, byte for byte (D-O9, critic 1 and 23)"
 mustread() { awk '/^```$/ && !f { getline l; if (l == "## Human must read") { f = 1; print "```"; print l; next } } f { print } f && /^- The "why" is one line/ { exit }' "$1"; }

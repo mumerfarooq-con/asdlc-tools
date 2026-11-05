@@ -30,7 +30,7 @@ Diff mode: feature/rename-name (working tree) against origin/main, 2 files.
 3. app/views.py:5 — needs change — the API response key changes; clients reading display_name break
 4. app/models.py, app/serializers.py — fine — the two edits agree
 Not searched: FE not checked (re-run with --also ../<fe-repo>); other API consumers.
-Report: .ovo/impact/feature-rename-name-202611042114.md
+Report: .ovo/impact/feature-rename-name-202611042114/impact.md
 ```
 
 Run it again with `--also ../web` to search the frontend too. With free text (`/ovo:impact rename display_name to full_name`) it works from what you describe, before you write any code.
@@ -50,7 +50,7 @@ Verdict: REQUEST_CHANGES
 4. MAJOR app/settings.py:3 — CORS_ALLOW_ALL_ORIGINS = True opens the whole app, unrelated to refunds
 ...
 Risk tier: high — app/refunds.py:4-8 (authz), app/refunds.py:6-7 (billing), app/settings.py:1-3 (env-config)
-Report: .ovo/review/feature-refund-202611050536/report.md
+Report: .ovo/review/feature-refund-202611050536/review.md
 Say which to fix, e.g. `fix 1 and 3`.
 ```
 

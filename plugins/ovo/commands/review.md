@@ -25,17 +25,17 @@ Run each script from the repo root as its own Bash call, exactly as shown: never
 
 ## 3. Review
 Give each agent only `<id>` and the paths `.ovo/review/<id>/diff.patch` and `.ovo/review/<id>/target.txt`, plus `CLAUDE.md` if the repo root has one. Do not review the code yourself.
-- **Solo:** invoke `reviewer`. It writes `.ovo/review/<id>/report.md`.
-- **Council:** invoke `lens-security`, `lens-correctness` and `lens-architecture` in parallel, in the foreground (one message with three calls). They write `.ovo/review/<id>/security.md`, `.ovo/review/<id>/correctness.md` and `.ovo/review/<id>/architecture.md`; pass no other path. When all three have returned, invoke `chair` with `<id>`. It writes `.ovo/review/<id>/report.md`.
+- **Solo:** invoke `reviewer`. It writes `.ovo/review/<id>/review.md`.
+- **Council:** invoke `lens-security`, `lens-correctness` and `lens-architecture` in parallel, in the foreground (one message with three calls). They write `.ovo/review/<id>/security.md`, `.ovo/review/<id>/correctness.md` and `.ovo/review/<id>/architecture.md`; pass no other path. When all three have returned, invoke `chair` with `<id>`. It writes `.ovo/review/<id>/review.md`.
 - If an agent returns its report but says it could not write its file, write the text it returned to that exact path yourself, unchanged, under a first line `> Written by /ovo:review from the <agent> reply.` Never change a finding.
 
 ## 4. Reply
-Read `.ovo/review/<id>/report.md`, then reply in at most 25 lines:
+Read `.ovo/review/<id>/review.md`, then reply in at most 25 lines:
 1. The "Reviewing ..." line.
 2. The verdict.
 3. The findings with the report's numbers, BLOCKER first, at most 12, one line each: `<n>. <SEVERITY> <file:line> — <issue>`.
 4. `Risk tier: <tier>`, and each must-read hunk from the report's `## Human must read` section.
-5. `Report: .ovo/review/<id>/report.md`
+5. `Report: .ovo/review/<id>/review.md`
 6. The line: Say which to fix, e.g. `fix 1 and 3`.
 
 Then stop. Fixing is the user's call, in their next message.
