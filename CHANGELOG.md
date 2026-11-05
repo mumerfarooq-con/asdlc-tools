@@ -4,6 +4,19 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
+## [1.7.2] - 2026-11-05
+
+The impact scan's core moves to `shared/`, so the new `ovo` plugin in this marketplace can use the same scan. One behaviour change: `.ovo` is skipped.
+
+### Changed
+
+- **The impact scan's search is now `scripts/impact-core.sh`**, a link to `shared/scripts/impact-core.sh` that Claude Code copies into the plugin at install. `impact-scan.sh` keeps its arguments, the config keys, the `plans/<ID>/` paths, its messages and the plan template copy, and passes everything else to the core as flags. Its output (`impact.md`, stdout and stderr) is byte-identical to 1.7.1's on every existing test sandbox, with grep and with ripgrep. The template is now copied just after `impact.md` is written instead of just before; a failed search still writes neither.
+- **`.ovo` is skipped at the repo root by the impact scan**, like `plans`, `prds` and `.asdlc`. It holds the ovo plugin's reports, which are not code. A nested `.ovo` directory is still searched.
+
+### Added
+
+- **A second plugin in the marketplace, `ovo`**: `/ovo:impact` and `/ovo:review` for everyday chat use, with zero setup. Its changes are in `plugins/ovo/CHANGELOG.md`.
+
 ## [1.7.1] - 2026-11-03
 
 Docs and agent descriptions. No script changes.

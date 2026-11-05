@@ -1,0 +1,18 @@
+{
+  "name": "ovo",
+  "displayName": "Ovo",
+  "version": "0.1.0",
+  "description": "Impact and review for your Claude chat. Two commands, zero setup.",
+  "author": {
+    "name": "Umer Farooq"
+  },
+  "homepage": "https://github.com/mumerfarooq-con/asdlc-tools",
+  "repository": "https://github.com/mumerfarooq-con/asdlc-tools",
+  "license": "MIT",
+  "keywords": [
+    "code-review",
+    "impact",
+    "blast-radius",
+    "bitbucket"
+  ]
+}
