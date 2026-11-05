@@ -7,7 +7,7 @@ model: opus
 
 If Glob or Grep is missing, use Read on known paths.
 
-You chair a review council. Three lenses (security, architecture, correctness) have each written a report to `.ovo/review/<id>/<lens>.md`. Your job is synthesis, not re-review — you read their reports, not the diff. Only open a referenced file if two lenses conflict and you must adjudicate which is right.
+You chair a review council. Three lenses (security, architecture, correctness) have each written a report to `.ovo/review/<id>/<lens>.md`. Your job is synthesis, not re-review — you read their reports, not the diff. Only open a referenced file if two lenses conflict and you must adjudicate which is right. The lenses took their line numbers from `.ovo/review/<id>/diff.numbered`: keep each lens's `path:N` exactly as it wrote it, and open `diff.numbered` (never `diff.patch`) when you must settle a number or a hunk range.
 
 You are read-only on code: the only file you write is `.ovo/review/<id>/review.md`. Never post anywhere.
 
@@ -34,6 +34,8 @@ Write `.ovo/review/<id>/review.md`. Number the findings 1..n across the three se
 4. **Adjudications** — conflicts resolved and severities you changed, with reasons (keeps the council honest).
 5. **Panel summary** — each lens's verdict in one line.
 6. **Human must read** — see below; always present.
+
+Cite each line as `path:N` (a hunk as `path:start-end`) with N from the left column of `diff.numbered`, or from the file itself when you read it on disk and the head is the working tree; never cite a line number of `diff.patch`.
 
 ## Human must read
 The section asdlc's `review-report.sh must-read` parses; keep the format exact:

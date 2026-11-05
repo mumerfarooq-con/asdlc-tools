@@ -36,7 +36,7 @@ Then write `.ovo/impact/<id>/terms.txt`, one term per line: every field, model, 
 Run `${CLAUDE_PLUGIN_ROOT}/scripts/impact.sh <id>`, adding `--also <dir>` for each one given. If it exits non-zero, report its message and STOP.
 
 ## 5. Analyst
-Invoke `impact-analyst` with only: `<id>`, the mode, the `--also` dirs (or "none"), and the paths `.ovo/impact/<id>/hits.md`, `.ovo/impact/<id>/terms.txt`, and `.ovo/impact/<id>/intent.md` (intent mode) or `.ovo/impact/<id>/diff.patch` (diff mode).
+Invoke `impact-analyst` with only: `<id>`, the mode, the `--also` dirs (or "none"), and the paths `.ovo/impact/<id>/hits.md`, `.ovo/impact/<id>/terms.txt`, and `.ovo/impact/<id>/intent.md` (intent mode) or `.ovo/impact/<id>/diff.patch` and `.ovo/impact/<id>/diff.numbered` (diff mode; base.sh writes both, and the analyst takes line numbers from `diff.numbered`).
 - It replies `RESCAN` → run step 4 again (pass 2, same flags), then invoke it once more.
 - A second `RESCAN` is not allowed: say the scan wanted a third pass, give `.ovo/impact/<id>/impact.md` if it exists, and STOP.
 

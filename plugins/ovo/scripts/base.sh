@@ -10,8 +10,10 @@
 # Prints "key: value" lines: base, head, merge-base, files, lines, untracked, skipped.
 # --write <sub> also writes .ovo/<sub>/diff.patch and .ovo/<sub>/target.txt: the same lines, then
 # "## files" (added deleted path per file) and "## functions" (path: the hunk's function context,
-# from git's hunk headers), and adds "patch: <path>" to the output. --max-files <n>: more changed
-# files than that exits 4 and writes nothing.
+# from git's hunk headers), and adds "patch: <path>" to the output. It also writes
+# .ovo/<sub>/diff.numbered, the same patch with each line's number in its file (see numbered()),
+# and adds "numbered: <path>". --max-files <n>: more changed files than that exits 4 and writes
+# nothing.
 # Exit: 0 printed; 2 no base, an unknown ref, no merge-base or bad input; 4 too many files.
 set -euo pipefail
 export LC_ALL=C
@@ -113,9 +115,69 @@ fi
   echo "skipped: ${skipped:-none}"
 } > "$work/summary"
 
+# The patch with line numbers, so an agent cites path:N with no arithmetic on hunk headers: per file
+# "=== <path> (<new file, deleted, renamed from ..., binary>)", each hunk's @@ line, then every patch
+# line behind a 7-wide column: the new file's line number for + and context lines, -N (the old
+# file's) for - lines, blank for "\ No newline at end of file". The hunk's counts say where its
+# body ends, so a removed line that starts with "--" is still a removed line.
+numbered() {  # <patch>
+  awk '
+    function unq(p) { sub(/\t$/, "", p); if (p ~ /^".*"$/) p = substr(p, 2, length(p) - 2); return p }
+    function guess(r,   h, x, y) {  # "a/P b/P": P (no ---/+++ lines for a binary or mode-only change)
+      h = int((length(r) - 1) / 2); x = unq(substr(r, 1, h)); y = unq(substr(r, h + 2))
+      return (substr(x, 3) == substr(y, 3)) ? substr(y, 3) : y
+    }
+    function fileline(  t, p) {  # the file line, once, before its first hunk
+      if (!infile || said) return
+      t = ""
+      if (isnew) t = t ", new file"
+      if (isdel) t = t ", deleted"
+      if (from != "") t = t ", " how " from " from
+      if (mode != "") t = t ", mode " mode
+      if (bin) t = t ", binary"
+      p = np != "" ? np : (op != "" ? op : gp)
+      printf "%s=== %s%s\n", (nfile++ ? "\n" : ""), p, (t == "" ? "" : " (" substr(t, 3) ")")
+      said = 1
+    }
+    BEGIN {
+      print "# The patch with line numbers. Left column: the line number in the new file (+ and unchanged"
+      print "# lines), or -N, the line number in the old file (- lines). Cite path:N from this column; for"
+      print "# a removed line, cite the nearest line without a minus."
+    }
+    /^\\/ { printf "%7s %s\n", "", $0; next }
+    (ol > 0 || nl > 0) && /^[-+ ]/ {
+      if ($0 ~ /^-/) { printf "%7s %s\n", "-" on, $0; on++; ol--; next }
+      printf "%7d %s\n", nn, $0; nn++; nl--
+      if ($0 ~ /^ /) { on++; ol-- }
+      next
+    }
+    /^diff --git / {
+      fileline(); infile = 1; said = 0; isnew = isdel = bin = 0; ol = nl = 0
+      np = op = from = how = mode = ""; gp = guess(substr($0, 12)); next
+    }
+    /^new file mode / { isnew = 1; next }
+    /^deleted file mode / { isdel = 1; next }
+    /^old mode / { mode = substr($0, 10); next }
+    /^new mode / { mode = mode " -> " substr($0, 10); next }
+    /^rename from / { how = "renamed"; from = unq(substr($0, 13)); next }
+    /^copy from / { how = "copied"; from = unq(substr($0, 11)); next }
+    /^rename to / { np = unq(substr($0, 11)); next }
+    /^copy to / { np = unq(substr($0, 9)); next }
+    /^Binary files / { bin = 1; next }
+    /^--- / { p = unq(substr($0, 5)); if (p != "/dev/null") { sub(/^a\//, "", p); op = p }; next }
+    /^\+\+\+ / { p = unq(substr($0, 5)); if (p != "/dev/null") { sub(/^b\//, "", p); np = p }; next }
+    /^@@ / {
+      fileline(); split($0, f, " ")
+      split(substr(f[2], 2), a, ","); on = a[1] + 0; ol = (2 in a) ? a[2] + 0 : 1
+      split(substr(f[3], 2), a, ","); nn = a[1] + 0; nl = (2 in a) ? a[2] + 0 : 1
+      print; next
+    }
+    END { fileline() }' "$1"
+}
+
 if [ -n "$sub" ]; then
   dir="$("$HERE/ovo-dir.sh" "$sub")" || exit 2
-  for f in diff.patch target.txt; do [ ! -L "$dir/$f" ] || die "refusing: $dir/$f is a symbolic link"; done
+  for f in diff.patch diff.numbered target.txt; do [ ! -L "$dir/$f" ] || die "refusing: $dir/$f is a symbolic link"; done
   {
     cat "$work/summary"
     echo "patch-lines: $(awk 'END {print NR}' "$work/patch")"
@@ -127,10 +189,13 @@ if [ -n "$sub" ]; then
     awk '/^\+\+\+ b\// { p = substr($0, 7) }
          /^@@ / { c = $0; sub(/^@@ [^@]* @@ ?/, "", c); if (c != "" && !seen[p ": " c]++) print p ": " c }' "$work/patch" | head -n 200
   } > "$work/target"
+  numbered "$work/patch" > "$work/numbered"
   mv "$work/patch" "$dir/diff.patch"
+  mv "$work/numbered" "$dir/diff.numbered"
   mv "$work/target" "$dir/target.txt"
   cat "$work/summary"
   echo "patch: $dir/diff.patch"
+  echo "numbered: $dir/diff.numbered"
 else
   cat "$work/summary"
 fi

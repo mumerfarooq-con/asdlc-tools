@@ -121,7 +121,7 @@ assert_eq "$(grep '^https://' "$FAKECURL_LOG")" "https://api.bitbucket.org/2.0/r
 for a in --proto =https --max-redirs --max-time 30 --config; do assert_contains "$A" "$a" "argv has $a"; done
 assert_eq "$(grep -cxE -- '-L|--location' "$FAKECURL_LOG" || true)" "0" "no redirect following"
 assert_contains "$(cat "$FAKECURL_STDIN_LOG")" "header = \"Authorization: Bearer $TOKEN\"" "Bearer on stdin"
-assert_eq "$(ls -A .ovo/review/r6 | tr '\n' ' ')" "diff.patch target.txt " "the PR body is not kept"
+assert_eq "$(ls -A .ovo/review/r6 | tr '\n' ' ')" "diff.numbered diff.patch target.txt " "the PR body is not kept"
 
 t "Bitbucket: 401 retries once with Basic when BITBUCKET_EMAIL is set; otherwise stops"
 fresh_logs

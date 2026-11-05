@@ -160,6 +160,20 @@ for a in reviewer chair; do
   assert_contains "$(cat "$O/agents/$a.md")" "Number the findings 1..n across" "$a numbers findings across severities"
 done
 
+t "line numbers come from diff.numbered: every agent has the same citing rule, both commands pass it (a review cited diff.patch positions)"
+rule='Cite each line as `path:N` (a hunk as `path:start-end`) with N from the left column of `diff.numbered`, or from the file itself when you read it on disk and the head is the working tree; never cite a line number of `diff.patch`.'
+for a in reviewer lens-security lens-correctness lens-architecture chair impact-analyst; do
+  A="$(cat "$O/agents/$a.md")"
+  assert_contains "$A" ".ovo/" "$a read"
+  assert_contains "$A" "diff.numbered" "$a names diff.numbered"
+  assert_contains "$A" "$rule" "$a has the citing rule, verbatim"
+done
+assert_eq "$(grep -lF "$rule" "$O"/agents/*.md | wc -l | tr -d ' ')" "$(ls "$O"/agents/*.md | wc -l | tr -d ' ')" "every agent has the rule"
+for c in impact review; do
+  assert_contains "$(cat "$O/commands/$c.md")" ".ovo/$c/<id>/diff.numbered" "$c.md passes diff.numbered"
+done
+assert_contains "$(cat "$O/commands/review.md")" 'never recount them from `diff.patch`' "review.md copies the report's numbers"
+
 t "every .ovo/ file an agent or command names is one a subagent may write: not report*, summary*, findings* or analysis*, not named from <id>"
 # Claude Code 2.1.294 refuses a subagent Write whose basename matches ^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$, any case.
 paths="$(cd "$O" && grep -oHE '\.ovo/[A-Za-z0-9._<>/-]*\.md' agents/*.md commands/*.md | LC_ALL=C sort -u)"

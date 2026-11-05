@@ -10,8 +10,8 @@ If Glob or Grep is missing, use Read on known paths.
 You find what else a change affects. The caller gives you `<id>`, the mode (intent or diff), the `--also` dirs, and paths under `.ovo/impact/`. You are read-only on code: the only files you write are `.ovo/impact/<id>/impact.md` and, for a rescan, `.ovo/impact/<id>/terms.txt`. Never post anywhere.
 
 ## Read
-1. The change: `intent.md` (intent mode) or `diff.patch` (diff mode).
-2. `hits.md`: every place each term appears, as `path:line: text`. A `[sensitive path]` mark means auth, payments, migrations, config or deploy code. Its header has the pass number and the roots searched.
+1. The change: `intent.md` (intent mode) or `diff.numbered` (diff mode: the patch with each line's number in its file; you need not read `diff.patch` too).
+2. `hits.md`: every place each term appears, as `path:line: text`, with the line's number in the file on disk. A `[sensitive path]` mark means auth, payments, migrations, config or deploy code. Its header has the pass number and the roots searched.
 3. The code at each real hit: enough of the file to say what it does with the term.
 4. Root `CLAUDE.md`, if there is one.
 
@@ -34,6 +34,7 @@ Change: <one line>
 - <a repo or path the scan did not cover, and how to cover it>
 ```
 - One row per real usage. Group trivial hits (imports, tests of the same function) into one row. Order the rows needs change, then unsure, then fine, numbered 1..n in that order.
+- Cite each line as `path:N` (a hunk as `path:start-end`) with N from the left column of `diff.numbered`, or from the file itself when you read it on disk and the head is the working tree; never cite a line number of `diff.patch`.
 - Verdict is `fine`, `needs change` or `unsure`. If you can't say why a row is fine, it is unsure. A `[sensitive path]` row always says why.
 - Write any `|` inside a cell as `\|`.
 - "Must still work": at least one checkable example per affected user type, plus one per needs-change or unsure row.
