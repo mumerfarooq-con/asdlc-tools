@@ -136,4 +136,45 @@ for s in '.ovo/impact/<id>.md' '## What else uses this' '## Must still work' '##
   assert_contains "$(cat "$IA")" "$s" "impact-analyst says: $s"
 done
 
+t "/ovo:review: user-invoked only, never offers to post, the reply shape (D-O12, Task 7)"
+RV="$O/commands/review.md"
+assert_contains "$(fm "$RV")" "disable-model-invocation: true" "review is user-invoked only"
+for s in 'ovo-dir.sh review --new' 'review-target.sh <id>' 'never `--council`' 'Start no reviewer' 'in parallel, in the foreground' \
+         'invoke `chair`' 'BLOCKER first, at most 12' 'Risk tier: <tier>' 'Report: .ovo/review/<id>/report.md' 'Say which to fix, e.g. `fix 1 and 3`.' \
+         'never offer to' 'at most 25 lines' '.ovo/review/<id>/security.md' '.ovo/review/<id>/correctness.md' \
+         '.ovo/review/<id>/architecture.md' 'pass no other path' 'Never change a finding.'; do
+  assert_contains "$(cat "$RV")" "$s" "review.md says: $s"
+done
+for a in reviewer lens-security lens-correctness lens-architecture chair; do
+  [ -f "$O/agents/$a.md" ] && ok || nok "missing agent $a"
+done
+
+t "review agents: each writes only its own file under .ovo/review/<id>/, read-only tools, no fetching"
+for pair in reviewer:report.md lens-security:security.md lens-correctness:correctness.md lens-architecture:architecture.md chair:report.md; do
+  a="${pair%%:*}"; f="${pair#*:}"; A="$(cat "$O/agents/$a.md")"
+  assert_contains "$A" "the only file you write is \`.ovo/review/<id>/$f\`" "$a writes only $f"
+  assert_eq "$(fm "$O/agents/$a.md" | sed -n 's/^tools:[[:space:]]*//p')" "Read, Glob, Grep, Write" "$a tools"
+  for w in 'gh pr' 'git fetch' 'Bitbucket MCP' 'pull-request tools'; do assert_not_contains "$A" "$w" "$a fetches ($w)"; done
+done
+for a in reviewer chair; do
+  assert_contains "$(cat "$O/agents/$a.md")" "Number the findings 1..n across" "$a numbers findings across severities"
+done
+
+t "the Human must read contract is asdlc's, byte for byte (D-O9, critic 1 and 23)"
+mustread() { awk '/^```$/ && !f { getline l; if (l == "## Human must read") { f = 1; print "```"; print l; next } } f { print } f && /^- The "why" is one line/ { exit }' "$1"; }
+for pair in reviewer:pr-reviewer chair:pr-review-chair; do
+  o="${pair%%:*}"; a="${pair#*:}"
+  ref="$(mustread "$ROOT/plugins/asdlc/agents/$a.md")"
+  assert_contains "$ref" "At most 5 rows" "asdlc $a block read"
+  assert_eq "$(mustread "$O/agents/$o.md")" "$ref" "Ovo $o's block equals asdlc $a's"
+  assert_contains "$(cat "$O/agents/$o.md")" "## Human must read" "$o names the section heading"
+  assert_contains "$(cat "$O/agents/$o.md")" "At most 5 rows" "$o names the 5-row cap"
+done
+cand() { sed -n 's/.*\(`## Human-must-read candidates` — up to 5 rows.*No tier; the chair decides it\.\)$/\1/p' "$1"; }
+for l in security correctness architecture; do
+  ref="$(cand "$ROOT/plugins/asdlc/agents/pr-reviewer-$l.md")"
+  assert_contains "$ref" "Human-must-read candidates" "asdlc $l candidates line read"
+  assert_eq "$(cand "$O/agents/lens-$l.md")" "$ref" "Ovo lens-$l's candidates line equals asdlc's"
+done
+
 finish
