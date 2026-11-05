@@ -45,6 +45,9 @@ fixture_repo() {
 # The frontmatter block of a command or agent file (between the first two --- lines).
 fm() { awk 'NR == 1 && $0 != "---" {exit} /^---$/ {n++; if (n == 2) exit; next} n == 1 {print}' "$1"; }
 
+# One allowed-tools rule without surrounding spaces.
+trim_rule() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
+
 # An agent's description as one line: a plain value, or a folded/literal block (>, |, >-) joined.
 agent_desc() {
   fm "$1" | awk '
