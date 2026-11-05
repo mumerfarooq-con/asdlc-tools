@@ -1,8 +1,32 @@
-# ASDLC: agentic SDLC workflows for Claude Code
+# asdlc-tools: Ovo and ASDLC for Claude Code
 
 [![validate](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml/badge.svg)](https://github.com/mumerfarooq-con/asdlc-tools/actions/workflows/validate.yml)
-[![version](https://img.shields.io/github/v/tag/mumerfarooq-con/asdlc-tools?label=version&filter=asdlc--v*)](CHANGELOG.md)
+[![asdlc](https://img.shields.io/github/v/tag/mumerfarooq-con/asdlc-tools?label=asdlc&filter=asdlc--v*)](CHANGELOG.md)
+[![ovo](https://img.shields.io/github/v/tag/mumerfarooq-con/asdlc-tools?label=ovo&filter=ovo--v*)](plugins/ovo/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+Two Claude Code plugins in one marketplace. This repository is both their source and the marketplace. Start with Ovo; add ASDLC when you want the whole pipeline.
+
+## Two plugins
+
+| Plugin | For | Commands |
+|---|---|---|
+| **[Ovo](plugins/ovo/README.md)** | Everyone, in the chat you already use. Zero setup. | `/ovo:impact`, `/ovo:review` |
+| **[ASDLC](#asdlc)** | The full pipeline: approved plans, the Jira leg, a PR review council, a pre-delivery check. | `/asdlc:implement-prd`, `/asdlc:plan`, `/asdlc:jira-run`, `/asdlc:jira-setup`, `/asdlc:review-pr`, `/asdlc:review-tour`, `/asdlc:pdqc` |
+
+### Ovo: for everyone
+
+Don't count your PRs before they hatch. `/ovo:impact` shows what else uses the code you are about to change; `/ovo:review` reviews your branch or a PR before a teammate does, alone or as a council. No config, no token, and it never edits code or posts anywhere.
+
+```
+/plugin marketplace add mumerfarooq-con/asdlc-tools
+/plugin install ovo@asdlc-tools
+/reload-plugins
+```
+
+Examples, requirements and the FAQ are in the [Ovo README](plugins/ovo/README.md).
+
+### ASDLC: the full pipeline
 
 ASDLC is a Claude Code plugin that runs the delivery loop with specialised subagents and a human approval gate. It takes a spec or a Jira ticket, writes a reviewed plan, builds the plan once you approve it, reviews the pull request, and checks the whole codebase before release.
 
@@ -10,9 +34,17 @@ ASDLC is a Claude Code plugin that runs the delivery loop with specialised subag
 - **Review from several angles.** Security, correctness and architecture panelists each review the PR, and a chair reconciles their findings into one verdict.
 - **Stack-agnostic.** Your repo's own `CLAUDE.md` and standards docs always win. Stack-specific heuristics live in swappable profiles (Django, FastAPI, Node/Express, React).
 
-This repository is both the plugin source and its marketplace.
+```
+/plugin marketplace add mumerfarooq-con/asdlc-tools
+/plugin install asdlc@asdlc-tools
+/reload-plugins
+```
 
-## Contents
+The rest of this page is about ASDLC.
+
+## ASDLC
+
+### Contents
 
 - [Commands](#commands)
 - [Requirements](#requirements)
@@ -25,7 +57,7 @@ This repository is both the plugin source and its marketplace.
 - [Troubleshooting](#troubleshooting)
 - [Contributing and releases](#contributing-and-releases)
 
-## Commands
+### Commands
 
 | Command | What it does |
 |---|---|
@@ -37,7 +69,7 @@ This repository is both the plugin source and its marketplace.
 | `/asdlc:review-tour <PR id \| PR URL \| KEY>` | **Human review.** Walks you through the riskiest hunks of a PR, one behaviour question each, and records the hunks you answered. Never approves or merges. |
 | `/asdlc:pdqc` | **Pre-Delivery Quality Check.** Five inspectors and a QA chair review the whole codebase for the cross-cutting issues that per-PR review can't see. It produces findings and remediation work items, and never edits code. |
 
-## Requirements
+### Requirements
 
 - **Claude Code**: the terminal, an IDE extension, or the Code tab of the Claude desktop app.
 - **All workflows:** `bash` and `git`. [ripgrep](https://github.com/BurntSushi/ripgrep) is optional; the impact scan falls back to `grep` with identical output.
@@ -45,9 +77,9 @@ This repository is both the plugin source and its marketplace.
 - **Jira leg:** Jira Cloud and Bitbucket Cloud, `curl` and `jq`. For Jira, either the Atlassian MCP connector (connected in Claude Code, no token needed) or an API token in your shell environment (`JIRA_EMAIL`, `JIRA_TOKEN`); with the connector the token is optional and only adds image downloads, watchers, sprints and status-name checks. For Bitbucket, `BITBUCKET_TOKEN`. Tokens never go in a file. See the [Jira leg guide](plugins/asdlc/jira/README.md).
 - **PDQC calibration (optional):** Python 3.
 
-## Install
+### Install
 
-### Claude Code (terminal, IDE, or the desktop app's Code tab)
+#### Claude Code (terminal, IDE, or the desktop app's Code tab)
 
 Run these in a Claude Code session:
 
@@ -65,7 +97,7 @@ If adding the marketplace fails with an authentication or SSH error, use the HTT
 /plugin marketplace add https://github.com/mumerfarooq-con/asdlc-tools.git
 ```
 
-### Claude desktop app: Customize → Plugins
+#### Claude desktop app: Customize → Plugins
 
 ASDLC is not listed in Anthropic's plugin directory, so it does not appear under **Discover** until you add this repository as a marketplace:
 
@@ -79,16 +111,16 @@ A plugin added this way is saved to your claude.ai account and also reaches Clau
 > [!NOTE]
 > ASDLC is built for Claude Code. Its workflows run shell scripts and `git` in your repository, so use them from the terminal, an IDE, or the desktop app's Code tab. In regular chat, commands load only as skills and the subagents are ignored. If your organization restricts which marketplaces members can add, the app refuses the repository: ask an Owner to allow `mumerfarooq-con/asdlc-tools`.
 
-### Update
+#### Update
 
 ```
 /plugin marketplace update asdlc-tools
 /reload-plugins
 ```
 
-## Quick start
+### Quick start
 
-### Build from a spec
+#### Build from a spec
 
 ```
 /asdlc:implement-prd prds/checkout-v2.md --plan-only
@@ -101,7 +133,7 @@ A plugin added this way is saved to your claude.ai account and also reaches Clau
 
 Every task goes through executor, reviewer and tester before the next one starts. Without `--plan-only`, the command plans and builds in one go, with no approval stop.
 
-### Drive it from Jira
+#### Drive it from Jira
 
 ```
 /asdlc:jira-setup        # once per repo
@@ -112,7 +144,7 @@ Every task goes through executor, reviewer and tester before the next one starts
 
 Each approved ticket gets its own `feature/<KEY>-<slug>` branch, a Bitbucket PR and a review. You merge it yourself. Before each plan runs, the ticket is checked: if it changed after you approved the plan, the plan is marked stale and re-planned in the same run, and you approve it again. Runs are locked and resume after a crash. The [Jira leg guide](plugins/asdlc/jira/README.md) covers configuration, crash recovery and the merge-to-Testing automation.
 
-### Review a pull request
+#### Review a pull request
 
 ```
 /asdlc:review-pr 128                  # single reviewer
@@ -122,7 +154,7 @@ Each approved ticket gets its own `feature/<KEY>-<slug>` branch, a Bitbucket PR 
 
 Reports are written to `plans/pr-review-<id>*.md`. Nothing is posted to the PR unless you ask.
 
-### Check a codebase before release
+#### Check a codebase before release
 
 ```
 /asdlc:pdqc
@@ -139,14 +171,14 @@ python3 extract_seed_checklist.py bugs.csv -o pdqc/seed-checklist.md
 
 Then set `use_seed_checklist: true` and the `seed_checklist` path in your repo's `pdqc.config.yaml`. The checklist is your project's data and never ships with the plugin; the format is in [`seed-checklist.sample.md`](plugins/asdlc/pdqc/calibration/seed-checklist.sample.md).
 
-## How approval works
+### How approval works
 
 - **Plans are approved in the file, by a person.** `/asdlc:plan approve` checks that the plan is complete: required sections filled, open questions answered, critic blockers answered. It then records a hash of the approved part. No command pre-approves that step, so Claude Code always asks you to confirm it.
 - **An edited plan no longer runs.** If the approved part changes after approval, the plan reports `EDITED` and stops until it is re-approved. If a Jira ticket changes after approval, the plan reports `STALE` and is re-planned, and `approve` refuses a stale plan. Agents log progress below a marker that the hash doesn't cover, so a run's own logging never voids the approval.
 - **No silent writes to shared systems.** Commits, pushes and Bitbucket writes are not pre-approved; each one is shown to you first.
 - **Tokens stay in your environment.** The Jira token, when you use one, is sent only to your configured Jira URL. Over the Atlassian MCP connector, no token is used and a plugin hook keeps ticket text out of the orchestrator's context.
 
-## Human review
+### Human review
 
 AI review is not a human review. When several tickets run in parallel it is easy to read only the PR description and the review summary, so the plugin tries to make the human read the code, or to make skipping it visible. None of it blocks a merge: `/asdlc:jira-run` never merges.
 
@@ -158,9 +190,9 @@ AI review is not a human review. When several tickets run in parallel it is easy
 
 Every PR comment the plugin posts starts with `[asdlc] `. Details, exit codes and the trust model are in the [Jira leg guide](plugins/asdlc/jira/README.md#human-review).
 
-## Subagents
+### Subagents
 
-All 17 subagents ship inside the one plugin.
+All 17 subagents ship inside the asdlc plugin.
 
 | Workflow | Subagents |
 |---|---|
@@ -168,14 +200,14 @@ All 17 subagents ship inside the one plugin.
 | PR Review | `pr-reviewer`, `pr-reviewer-security`, `pr-reviewer-correctness`, `pr-reviewer-architecture`, `pr-review-chair`, `review-brief` |
 | PDQC | `inspector-contract-consistency`, `inspector-error-edge`, `inspector-documentation`, `inspector-maintainability-debt`, `inspector-operability`, `qa-chair` |
 
-## Examples
+### Examples
 
 [Unedited reports](examples/) from running the workflows on well-known open-source projects:
 
 - **PDQC on [healthchecks](https://github.com/healthchecks/healthchecks):** 25 standing findings and 1 verified blocker. It also shows a false positive retracted in the open rather than removed.
 - **Review council on [wagtail#14411](https://github.com/wagtail/wagtail/pull/14411):** three lenses and a reconciled verdict.
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -188,6 +220,6 @@ All 17 subagents ship inside the one plugin.
 
 ## Contributing and releases
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the local test loop, validation and the release process. Changes are listed in [CHANGELOG.md](CHANGELOG.md), and releases follow [semantic versioning](https://semver.org/).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local test loop, validation and the release process. Changes are listed in [CHANGELOG.md](CHANGELOG.md) for ASDLC and [plugins/ovo/CHANGELOG.md](plugins/ovo/CHANGELOG.md) for Ovo. Each plugin has its own version and tags, and releases follow [semantic versioning](https://semver.org/).
 
 Licensed under the [MIT License](LICENSE).

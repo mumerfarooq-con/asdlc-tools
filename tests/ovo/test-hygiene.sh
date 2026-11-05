@@ -177,4 +177,29 @@ for l in security correctness architecture; do
   assert_eq "$(cand "$O/agents/lens-$l.md")" "$ref" "Ovo lens-$l's candidates line equals asdlc's"
 done
 
+t "docs and release: the READMEs, the changelog's top version is the plugin's, the release steps (Task 8, critic 19 and 20)"
+pv="$(sed -n 's/^  "version": "\([0-9][0-9.]*\)",$/\1/p' "$O/.claude-plugin/plugin.json")"
+top="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$O/CHANGELOG.md" | head -n1)"
+assert_eq "$top" "$pv" "Ovo CHANGELOG top version equals plugin.json"
+OR="$(cat "$O/README.md")"; RR="$(cat "$ROOT/README.md")"
+for c in impact review; do
+  assert_contains "$OR" "/ovo:$c" "Ovo README lists /ovo:$c"
+  assert_contains "$RR" "/ovo:$c" "root README lists /ovo:$c"
+  assert_contains "$(cat "$O/CHANGELOG.md")" "/ovo:$c" "Ovo CHANGELOG names /ovo:$c"
+done
+for s in "Don't count your PRs before they hatch." '/plugin install ovo@asdlc-tools' '## What Ovo never does' \
+         'How is this different from the built-in `/code-review`?' 'Customize → Plugins' "desktop app's Code tab"; do
+  assert_contains "$OR" "$s" "Ovo README has: $s"
+done
+assert_contains "$RR" '## Two plugins' "root README opens with Two plugins"
+assert_contains "$RR" '/plugin install ovo@asdlc-tools' "root README installs Ovo"
+assert_contains "$RR" '/plugin install asdlc@asdlc-tools' "root README installs ASDLC"
+assert_eq "$(grep -c '^All [0-9][0-9]* subagents' "$ROOT/README.md")" "1" "one 'All <n> subagents' line, asdlc's"
+assert_not_contains "$RR" '|\/\/\/\/\|' "the mascot is only in Ovo's README"
+CB="$(cat "$ROOT/CONTRIBUTING.md")"
+for s in 'bash tests/ovo/run.sh' 'claude plugin validate --strict plugins/ovo' 'claude plugin tag --push -m "ovo %s" plugins/ovo' \
+         'claude plugin tag --push -m "asdlc %s" plugins/asdlc' 'A change in `shared/` changes both plugins: bump both' 'core.symlinks=true'; do
+  assert_contains "$CB" "$s" "CONTRIBUTING has: $s"
+done
+
 finish
