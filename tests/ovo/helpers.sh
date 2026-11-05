@@ -36,7 +36,7 @@ fixture_repo() {
       git fetch -q origin
       git remote set-head origin -a >/dev/null 2>&1 ;;
     *)
-      git remote add origin "https://example.invalid/acme/widgets.git"
+      git remote add origin "/nonexistent-origin/acme/widgets.git"
       git update-ref refs/remotes/origin/main HEAD
       [ "$mode" = --no-head ] || git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main ;;
   esac
