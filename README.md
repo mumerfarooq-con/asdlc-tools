@@ -47,6 +47,8 @@ This repository is both the plugin source and its marketplace.
 
 ## Install
 
+New to the setup? The [install guide](docs/install-guide.md) walks through prerequisites, tokens and the Jira setup step by step for zsh, bash and PowerShell.
+
 ### Claude Code (terminal, IDE, or the desktop app's Code tab)
 
 Run these in a Claude Code session:
