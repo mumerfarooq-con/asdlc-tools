@@ -7,11 +7,9 @@
 OVO="$ROOT/plugins/ovo"
 OS="$OVO/scripts"
 SHARED_DIR="$ROOT/shared"            # the repo's shared/ (the Jira helpers' SHARED is asdlc's scripts/)
-OVO_FAKEBIN="$ROOT/tests/ovo/fakebin"
 
 # Tests never depend on a developer's GitHub login or Ovo test knobs.
-unset OVO_IMPACT_NO_RG OVO_IMPACT_NOW GH_TOKEN GITHUB_TOKEN GH_HOST \
-      FAKEGH_LOG FAKEGH_OUT FAKEGH_EXIT FAKECURL_STDIN_LOG
+unset OVO_IMPACT_NO_RG OVO_IMPACT_NOW GH_TOKEN GITHUB_TOKEN GH_HOST
 export GIT_TERMINAL_PROMPT=0
 
 # A fresh git repo with one commit on main; cd's into it. FR is its path.

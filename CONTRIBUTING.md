@@ -28,7 +28,7 @@ This repository holds two plugins and their marketplace: `plugins/ovo` (Ovo) and
 
 4. **Bump the version and changelog of each plugin you changed.** Any change to plugin content (commands, agents, scripts, PDQC assets) bumps that plugin's `.claude-plugin/plugin.json` per semver — patch for fixes/wording, minor for new capability (agents, profiles, modes), major for breaking workflow contracts — and adds an entry to its changelog: `CHANGELOG.md` at the root for ASDLC, `plugins/ovo/CHANGELOG.md` for Ovo. A change in `shared/` changes both plugins: bump both, with an entry in each. `/plugin update` delivers changes reliably only when the version moves.
 
-5. **Open a GitHub PR.** Reviewers nitpick inline and/or run `/ovo:review <branch> main` or `/asdlc:review-pr` on the diff.
+5. **Open a GitHub PR.** Reviewers nitpick inline and/or run `/code-review` or `/asdlc:review-pr` on the diff.
 
 6. **On merge**, a maintainer tags each changed plugin from the repo root, then publishes a GitHub Release for each tag:
 

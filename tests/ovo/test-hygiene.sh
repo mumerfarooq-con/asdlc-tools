@@ -41,9 +41,8 @@ for f in "$O"/agents/*.md; do
 done
 [ "$n" -le 6 ] && ok || nok "$n agents; Ovo ships at most 6"
 
-t "no jq outside the review target resolver (D-O5)"
-hits="$(grep -rnIw 'jq' "$O" "$SH" | grep -v -e "^$O/scripts/review-target.sh:" -e "^$O/README.md:" -e "^$O/CHANGELOG.md:" || true)"
-assert_eq "$hits" "" "jq outside scripts/review-target.sh"
+t "no jq in Ovo or shared/ (D-O5)"
+assert_eq "$(grep -rnIw 'jq' "$O" "$SH" || true)" "" "jq"
 
 t "no provider writes and no MCP (D-O3, D-O7)"
 pat='gh +pr +(comment|review|merge|close|create|edit|ready)|gh +api[^|]*(-X|--method) *(POST|PUT|PATCH|DELETE)|curl[^|]*(-X|--request) *(POST|PUT|PATCH|DELETE)|curl[^|]*(--data|--form|--upload-file|-d |-F |-T )|mcp__'
@@ -128,85 +127,50 @@ assert_contains "$(cat "$ROOT/plugins/asdlc/agents/prd-planner.md")" "$planner_t
 assert_contains "$(cat "$IMP")" "$planner_terms" "impact.md reuses it"
 assert_contains "$(cat "$IMP")" "env or config key, permission class and FE-facing field name" "plus env, config and FE names"
 
-t "impact-analyst: Read, Glob, Grep and Write only; writes its report, the Not searched rules, the FE hint (critic 7)"
+t "impact-analyst: Read, Glob, Grep and Write only; writes its report, the Not searched rules, the FE hint (critic 7); fine means checked, rows sit where the fix goes (G0 misses)"
 IA="$O/agents/impact-analyst.md"
 assert_eq "$(fm "$IA" | sed -n 's/^tools:[[:space:]]*//p')" "Read, Glob, Grep, Write" "tools"
 for s in '.ovo/impact/<id>/impact.md' '## What else uses this' '## Must still work' '## Not searched' 'FE not checked: re-run with `--also ../<fe-repo>`' \
-         'reply `RESCAN`' 'says `Pass: 1`' 'needs change' 'unsure' 'At most 22 lines'; do
+         'reply `RESCAN`' 'says `Pass: 1`' 'needs change' 'unsure' 'At most 22 lines' \
+         'not just that the name still resolves' 'If several records can share it' 'Put each row where the fix goes' 'with no default (or makes required) gets its own row' \
+         'cited at the line that builds it, not at the other app' 'whether the link points at an API path'; do
   assert_contains "$(cat "$IA")" "$s" "impact-analyst says: $s"
 done
 
-t "/ovo:review: user-invoked only, never offers to post, the reply shape (D-O12, Task 7)"
-RV="$O/commands/review.md"
-assert_contains "$(fm "$RV")" "disable-model-invocation: true" "review is user-invoked only"
-for s in 'ovo-dir.sh review --new' 'review-target.sh <id>' 'never `--council`' 'Start no reviewer' 'in parallel, in the foreground' \
-         'invoke `chair`' 'BLOCKER first, at most 12' 'Risk tier: <tier>' 'Report: .ovo/review/<id>/review.md' 'Say which to fix, e.g. `fix 1 and 3`.' \
-         'never offer to' 'at most 25 lines' '.ovo/review/<id>/security.md' '.ovo/review/<id>/correctness.md' \
-         '.ovo/review/<id>/architecture.md' 'pass no other path' 'Never change a finding.'; do
-  assert_contains "$(cat "$RV")" "$s" "review.md says: $s"
-done
-for a in reviewer lens-security lens-correctness lens-architecture chair; do
-  [ -f "$O/agents/$a.md" ] && ok || nok "missing agent $a"
-done
+t "0.1.0 ships /ovo:impact only: one command, one agent, no review files (G0)"
+assert_eq "$(cd "$O" && ls commands)" "impact.md" "commands"
+assert_eq "$(cd "$O" && ls agents)" "impact-analyst.md" "agents"
+assert_eq "$(cd "$O" && ls scripts | grep -i review || true)" "" "a review script"
 
-t "review agents: each writes only its own file under .ovo/review/<id>/, read-only tools, no fetching"
-for pair in reviewer:review.md lens-security:security.md lens-correctness:correctness.md lens-architecture:architecture.md chair:review.md; do
-  a="${pair%%:*}"; f="${pair#*:}"; A="$(cat "$O/agents/$a.md")"
-  assert_contains "$A" "the only file you write is \`.ovo/review/<id>/$f\`" "$a writes only $f"
-  assert_eq "$(fm "$O/agents/$a.md" | sed -n 's/^tools:[[:space:]]*//p')" "Read, Glob, Grep, Write" "$a tools"
-  for w in 'gh pr' 'git fetch' 'Bitbucket MCP' 'pull-request tools'; do assert_not_contains "$A" "$w" "$a fetches ($w)"; done
-done
-for a in reviewer chair; do
-  assert_contains "$(cat "$O/agents/$a.md")" "Number the findings 1..n across" "$a numbers findings across severities"
-done
-
-t "line numbers come from diff.numbered: every agent has the same citing rule, both commands pass it (a review cited diff.patch positions)"
+t "line numbers come from diff.numbered: every agent has the same citing rule, the command passes it (G0: a report cited diff.patch positions)"
 rule='Cite each line as `path:N` (a hunk as `path:start-end`) with N from the left column of `diff.numbered`, or from the file itself when you read it on disk and the head is the working tree; never cite a line number of `diff.patch`.'
-for a in reviewer lens-security lens-correctness lens-architecture chair impact-analyst; do
+for a in impact-analyst; do
   A="$(cat "$O/agents/$a.md")"
   assert_contains "$A" ".ovo/" "$a read"
   assert_contains "$A" "diff.numbered" "$a names diff.numbered"
   assert_contains "$A" "$rule" "$a has the citing rule, verbatim"
 done
 assert_eq "$(grep -lF "$rule" "$O"/agents/*.md | wc -l | tr -d ' ')" "$(ls "$O"/agents/*.md | wc -l | tr -d ' ')" "every agent has the rule"
-for c in impact review; do
-  assert_contains "$(cat "$O/commands/$c.md")" ".ovo/$c/<id>/diff.numbered" "$c.md passes diff.numbered"
-done
-assert_contains "$(cat "$O/commands/review.md")" 'never recount them from `diff.patch`' "review.md copies the report's numbers"
+assert_contains "$(cat "$O/commands/impact.md")" ".ovo/impact/<id>/diff.numbered" "impact.md passes diff.numbered"
 
 t "every .ovo/ file an agent or command names is one a subagent may write: not report*, summary*, findings* or analysis*, not named from <id>"
 # Claude Code 2.1.294 refuses a subagent Write whose basename matches ^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$, any case.
 paths="$(cd "$O" && grep -oHE '\.ovo/[A-Za-z0-9._<>/-]*\.md' agents/*.md commands/*.md | LC_ALL=C sort -u)"
-assert_contains "$paths" "agents/reviewer.md:.ovo/review/<id>/" "the .ovo/ paths were read"
+assert_contains "$paths" "agents/impact-analyst.md:.ovo/impact/<id>/impact.md" "the .ovo/ paths were read"
 assert_eq "$(printf '%s\n' "$paths" | grep -iE '/((report|summary|findings|analysis)[^/]*|<id>[^/]*)\.md$' || true)" "" "a path the CLI refuses a subagent, or one named from <id> (it starts with the branch)"
-
-t "the Human must read contract is asdlc's, byte for byte (D-O9, critic 1 and 23)"
-mustread() { awk '/^```$/ && !f { getline l; if (l == "## Human must read") { f = 1; print "```"; print l; next } } f { print } f && /^- The "why" is one line/ { exit }' "$1"; }
-for pair in reviewer:pr-reviewer chair:pr-review-chair; do
-  o="${pair%%:*}"; a="${pair#*:}"
-  ref="$(mustread "$ROOT/plugins/asdlc/agents/$a.md")"
-  assert_contains "$ref" "At most 5 rows" "asdlc $a block read"
-  assert_eq "$(mustread "$O/agents/$o.md")" "$ref" "Ovo $o's block equals asdlc $a's"
-  assert_contains "$(cat "$O/agents/$o.md")" "## Human must read" "$o names the section heading"
-  assert_contains "$(cat "$O/agents/$o.md")" "At most 5 rows" "$o names the 5-row cap"
-done
-cand() { sed -n 's/.*\(`## Human-must-read candidates` — up to 5 rows.*No tier; the chair decides it\.\)$/\1/p' "$1"; }
-for l in security correctness architecture; do
-  ref="$(cand "$ROOT/plugins/asdlc/agents/pr-reviewer-$l.md")"
-  assert_contains "$ref" "Human-must-read candidates" "asdlc $l candidates line read"
-  assert_eq "$(cand "$O/agents/lens-$l.md")" "$ref" "Ovo lens-$l's candidates line equals asdlc's"
-done
 
 t "docs and release: the READMEs, the changelog's top version is the plugin's, the release steps (Task 8, critic 19 and 20)"
 pv="$(sed -n 's/^  "version": "\([0-9][0-9.]*\)",$/\1/p' "$O/.claude-plugin/plugin.json")"
 top="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "$O/CHANGELOG.md" | head -n1)"
 assert_eq "$top" "$pv" "Ovo CHANGELOG top version equals plugin.json"
 OR="$(cat "$O/README.md")"; RR="$(cat "$ROOT/README.md")"
-for c in impact review; do
-  assert_contains "$OR" "/ovo:$c" "Ovo README lists /ovo:$c"
-  assert_contains "$RR" "/ovo:$c" "root README lists /ovo:$c"
-  assert_contains "$(cat "$O/CHANGELOG.md")" "/ovo:$c" "Ovo CHANGELOG names /ovo:$c"
+assert_contains "$OR" "/ovo:impact" "Ovo README lists /ovo:impact"
+assert_contains "$RR" "/ovo:impact" "root README lists /ovo:impact"
+assert_contains "$(cat "$O/CHANGELOG.md")" "/ovo:impact" "Ovo CHANGELOG names /ovo:impact"
+for f in "$O/README.md" "$O/CHANGELOG.md" "$O/.claude-plugin/plugin.json" "$ROOT/README.md" "$ROOT/CHANGELOG.md" "$ROOT/CONTRIBUTING.md" "$ROOT/.claude-plugin/marketplace.json"; do
+  assert_not_contains "$(cat "$f")" "/ovo:review" "${f#"$ROOT"/} names /ovo:review, which 0.1.0 does not ship"
 done
+assert_contains "$OR" 'Use both.' "Ovo README pairs impact with the built-in /code-review"
 for s in "Don't count your PRs before they hatch." '/plugin install ovo@asdlc-tools' '## What Ovo never does' \
          'How is this different from the built-in `/code-review`?' 'Customize → Plugins' "desktop app's Code tab"; do
   assert_contains "$OR" "$s" "Ovo README has: $s"

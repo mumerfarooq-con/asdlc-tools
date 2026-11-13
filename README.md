@@ -11,12 +11,12 @@ Two Claude Code plugins in one marketplace. This repository is both their source
 
 | Plugin | For | Commands |
 |---|---|---|
-| **[Ovo](plugins/ovo/README.md)** | Everyone, in the chat you already use. Zero setup. | `/ovo:impact`, `/ovo:review` |
+| **[Ovo](plugins/ovo/README.md)** | Everyone, in the chat you already use. Zero setup. | `/ovo:impact` |
 | **[ASDLC](#asdlc)** | The full pipeline: approved plans, the Jira leg, a PR review council, a pre-delivery check. | `/asdlc:implement-prd`, `/asdlc:plan`, `/asdlc:jira-run`, `/asdlc:jira-setup`, `/asdlc:review-pr`, `/asdlc:review-tour`, `/asdlc:pdqc` |
 
 ### Ovo: for everyone
 
-Don't count your PRs before they hatch. `/ovo:impact` shows what else uses the code you are about to change; `/ovo:review` reviews your branch or a PR before a teammate does, alone or as a council. No config, no token, and it never edits code or posts anywhere.
+Don't count your PRs before they hatch. `/ovo:impact` shows what else uses the code you are about to change, including in other repos such as the frontend. Pair it with the built-in `/code-review` before you open the PR. No config, no token, and it never edits code or posts anywhere.
 
 ```
 /plugin marketplace add mumerfarooq-con/asdlc-tools

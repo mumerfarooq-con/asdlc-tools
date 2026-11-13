@@ -4,7 +4,7 @@ All notable changes to the `asdlc` plugin are documented here. The format follow
 
 Every PR that changes plugin content (commands, agents, PDQC assets) must bump the version and add an entry here — `/plugin update` delivers changes reliably only when the version moves.
 
-## [1.7.2] - 2026-11-05
+## [1.7.2] - 2026-11-13
 
 The impact scan's core moves to `shared/`, so the new `ovo` plugin in this marketplace can use the same scan. One behaviour change: `.ovo` is skipped.
 
@@ -15,7 +15,7 @@ The impact scan's core moves to `shared/`, so the new `ovo` plugin in this marke
 
 ### Added
 
-- **A second plugin in the marketplace, `ovo`**: `/ovo:impact` and `/ovo:review` for everyday chat use, with zero setup. Its changes are in `plugins/ovo/CHANGELOG.md`.
+- **A second plugin in the marketplace, `ovo`**: `/ovo:impact` for everyday chat use, with zero setup. Its changes are in `plugins/ovo/CHANGELOG.md`.
 
 ## [1.7.1] - 2026-11-03
 

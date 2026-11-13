@@ -2,7 +2,7 @@
   "name": "ovo",
   "displayName": "Ovo",
   "version": "0.1.0",
-  "description": "Impact and review for your Claude chat. Two commands, zero setup.",
+  "description": "What else uses the code you are about to change? Impact analysis for your Claude chat, zero setup.",
   "author": {
     "name": "Umer Farooq"
   },
@@ -10,9 +10,7 @@
   "repository": "https://github.com/mumerfarooq-con/asdlc-tools",
   "license": "MIT",
   "keywords": [
-    "code-review",
     "impact",
-    "blast-radius",
-    "bitbucket"
+    "blast-radius"
   ]
 }

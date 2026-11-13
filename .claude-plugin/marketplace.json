@@ -3,7 +3,7 @@
   "owner": {
     "name": "Umer Farooq"
   },
-  "description": "Two Claude Code plugins: Ovo (impact and review in your chat, zero setup) and ASDLC (the full pipeline: PRD Implementor, Jira leg, PR review council, PDQC)",
+  "description": "Two Claude Code plugins: Ovo (impact analysis in your chat, zero setup) and ASDLC (the full pipeline: PRD Implementor, Jira leg, PR review council, PDQC)",
   "plugins": [
     {
       "name": "asdlc",
@@ -13,7 +13,7 @@
     {
       "name": "ovo",
       "source": "./plugins/ovo",
-      "description": "Impact and review for your Claude chat. Two commands, zero setup."
+      "description": "What else uses the code you are about to change? Impact analysis for your Claude chat, zero setup."
     }
   ]
 }

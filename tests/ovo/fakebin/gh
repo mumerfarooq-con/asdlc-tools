@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# Test stand-in for gh. Appends its argv (one per line, then "--end--") to $FAKEGH_LOG, prints
-# $FAKEGH_OUT and exits $FAKEGH_EXIT (default 0). Nothing here touches the network.
-{ for a in "$@"; do printf '%s\n' "$a"; done; echo "--end--"; } >> "${FAKEGH_LOG:-/dev/null}"
-printf '%s' "${FAKEGH_OUT:-}"
-exit "${FAKEGH_EXIT:-0}"
