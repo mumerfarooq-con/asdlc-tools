@@ -3,12 +3,17 @@
   "owner": {
     "name": "Umer Farooq"
   },
-  "description": "ASDLC: agentic SDLC workflows for Claude Code (PRD Implementor, Jira leg, PR review council, PDQC)",
+  "description": "Two Claude Code plugins: Ovo (impact analysis in your chat, zero setup) and ASDLC (the full pipeline: PRD Implementor, Jira leg, PR review council, PDQC)",
   "plugins": [
     {
       "name": "asdlc",
       "source": "./plugins/asdlc",
       "description": "Plan a spec or Jira ticket with a human approval gate, build it task by task, review PRs with a three-lens council, and run a pre-delivery quality check."
+    },
+    {
+      "name": "ovo",
+      "source": "./plugins/ovo",
+      "description": "What else uses the code you are about to change? Impact analysis for your Claude chat, zero setup."
     }
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "name": "ovo",
+  "displayName": "Ovo",
+  "version": "0.1.0",
+  "description": "What else uses the code you are about to change? Impact analysis for your Claude chat, zero setup.",
+  "author": {
+    "name": "Umer Farooq"
+  },
+  "homepage": "https://github.com/mumerfarooq-con/asdlc-tools",
+  "repository": "https://github.com/mumerfarooq-con/asdlc-tools",
+  "license": "MIT",
+  "keywords": [
+    "impact",
+    "blast-radius"
+  ]
+}
